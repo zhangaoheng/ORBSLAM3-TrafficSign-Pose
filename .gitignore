@@ -1,0 +1,38 @@
+# === 1. 编译产物 ===
+build/
+Thirdparty/DBoW2/build/
+Thirdparty/DBoW2/lib/
+Thirdparty/g2o/build/
+Thirdparty/g2o/lib/
+Thirdparty/Sophus/build/
+*.so
+*.a
+*.o
+
+# === 2. ORB-SLAM3 超大字典 ===
+Vocabulary/ORBvoc.txt
+Vocabulary/*.tar.gz
+
+# === 3. 数据集与测试视频（罪魁祸首） ===
+test/videos/
+test/videos copy/
+test/outputs/
+dataset/
+landmarkslam/data/
+*.mp4
+*.zip
+*.avi
+*.txt
+*.png
+*.ply
+*.jpg
+
+# === 4. 庞大的 Python 虚拟环境 ===
+landmarkslam/yolo_venv/
+__pycache__/
+
+# === 5. 轨迹输出文件 ===
+KeyFrameTrajectory.txt
+CameraTrajectory.txt
+kf_*.txt
+f_*.txt
