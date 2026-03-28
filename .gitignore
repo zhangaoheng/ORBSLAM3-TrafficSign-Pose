@@ -36,3 +36,6 @@ KeyFrameTrajectory.txt
 CameraTrajectory.txt
 kf_*.txt
 f_*.txt
+
+# === 6. 临时文件和日志 ===
+*.csv

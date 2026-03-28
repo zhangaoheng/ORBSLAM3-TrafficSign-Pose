@@ -1,70 +1,71 @@
 #!/bin/bash
 
-# 获取脚本所在目录
+# 获取脚本所在目录并切换到项目根目录
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 cd "$SCRIPT_DIR/.."
 
 echo "==========================================="
 echo "   1. Building Landmark SLAM (YOLO Fusion) "
 echo "==========================================="
-mkdir -p build
+# 建议在运行前清理 build 缓存以确保代码改动生效
+# rm -rf build/* mkdir -p build
 cd build
 cmake ..
-make -j4
+make -j$(nproc)
 if [ $? -ne 0 ]; then
     echo "Error: 编译失败！"
     exit 1
 fi
 cd ..
 
-echo "==========================================="
-echo "   2. Running YOLO11 Pose Estimation       "
-echo "==========================================="
-echo "正在执行 YOLO 预测并生成角点数据..."
-cd yolo11
+# ============================================
+# 2. 数据路径配置 (已切换为手动清洗后的固定路径)
+# ============================================
+# 这里指向你手动处理过的文件夹和对应的关键点文件
+DATA_DIR="/home/zah/ORB_SLAM3-master/landmarkslam/data/20260321_111801"
+YOLO_TXT="/home/zah/ORB_SLAM3-master/landmarkslam/yolo11_pose_results/run_20260322_202936/yolo_keypoints.txt"
 
-# 激活虚拟环境以运行YOLO
-source /home/zah/yolo_venv/bin/activate
-python test_yolo11_pose.py
-if [ $? -ne 0 ]; then
-    echo "Error: YOLO 推理脚本运行失败！请确保你激活了 Python 环境 (yolo_venv)。"
-    exit 1
-fi
-cd ..
-
-# 动态查找最新生成的 yolo_keypoints.txt
-YOLO_TXT=$(ls -t /home/zah/ORB_SLAM3-master/landmarkslam/yolo11_pose_results/run_*/yolo_keypoints.txt 2>/dev/null | head -1)
-
-if [ -z "$YOLO_TXT" ] || [ ! -f "$YOLO_TXT" ]; then
-    echo "Error: 找不到最新生成的 YOLO 检测结果 (yolo_keypoints.txt)！"
+# 检查文件是否存在
+if [ ! -f "$YOLO_TXT" ]; then
+    echo "Error: 找不到手动清洗的 YOLO 数据文件: $YOLO_TXT"
     exit 1
 fi
 
-echo ">> 成功找到最新 YOLO 角点数据: $YOLO_TXT"
+echo ">> 使用手动清洗后的数据源: $DATA_DIR"
+echo ">> 关键点文件: $YOLO_TXT"
 
 # ==================================
 # 3. 准备运行 C++ SLAM 融合程序
 # ==================================
 VOC_FILE="../Vocabulary/ORBvoc.txt"
 SETTINGS_FILE="landmarkslam.yaml"
-IMAGE_FOLDER="/home/zah/ORB_SLAM3-master/landmarkslam/data/20260321_111801" 
+# 使用与数据源配套的图片文件夹
+IMAGE_FOLDER="$DATA_DIR" 
 
-# 如果运行脚本时带了参数，可以直接用传入的参数覆盖原来的图片路径
+# 如果运行脚本时手动传入了其他图片路径，则覆盖默认路径
 if [ "$#" -eq 1 ]; then
     IMAGE_FOLDER=$1
 fi
 
 echo "==========================================="
-echo "   3. Running SLAM with YOLO Integration   "
+echo "   3. Running SLAM with Fixed Manual Data  "
 echo "==========================================="
-echo "Vocabulary : $VOC_FILE"
-echo "Settings   : $SETTINGS_FILE"
-echo "Image Dir  : $IMAGE_FOLDER"
-echo "YOLO Data  : $YOLO_TXT"
+echo "Vocabulary  : $VOC_FILE"
+echo "Settings    : $SETTINGS_FILE"
+echo "Image Dir   : $IMAGE_FOLDER"
+echo "YOLO Data   : $YOLO_TXT"
 echo "-------------------------------------------"
 
-mkdir -p log output
+# 确保输出目录存在
+mkdir -p log output output2
 
-# 运行刚才修改的新版本融合程序
+# 运行融合程序
 ./build/run_landmarkslam_yolo "$VOC_FILE" "$SETTINGS_FILE" "$IMAGE_FOLDER" "$YOLO_TXT"
 
+if [ $? -eq 0 ]; then
+    echo "==========================================="
+    echo "   🎉 运行成功！结果已保存至 output2 目录"
+    echo "==========================================="
+else
+    echo "Error: 程序运行过程中出现异常。"
+fi
