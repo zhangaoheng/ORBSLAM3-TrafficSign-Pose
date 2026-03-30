@@ -92,7 +92,32 @@ int main(int argc, char **argv)
         return -1;
     }
     
-    sort(imageFilePaths.begin(), imageFilePaths.end());
+    // 官方的 glob 可能不会保证完全的字典序，尤其是在不同平台上，所以我们手动排序一下
+    // sort(imageFilePaths.begin(), imageFilePaths.end());
+
+    // 🌟 修改：使用自定义排序，提取 capture_N_... 中的数字 N 进行排序
+    sort(imageFilePaths.begin(), imageFilePaths.end(), [](const cv::String& a, const cv::String& b) {
+        // 提取文件名部分
+        string nameA = a.substr(a.find_last_of("\\/") + 1);
+        string nameB = b.substr(b.find_last_of("\\/") + 1);
+
+        try {
+            // 假设格式为 capture_帧数_时间戳.jpg，跳过 "capture_" (8个字符)
+            size_t firstA = nameA.find('_');
+            size_t secondA = nameA.find('_', firstA + 1);
+            int idxA = std::stoi(nameA.substr(firstA + 1, secondA - firstA - 1));
+
+            size_t firstB = nameB.find('_');
+            size_t secondB = nameB.find('_', firstB + 1);
+            int idxB = std::stoi(nameB.substr(firstB + 1, secondB - firstB - 1));
+
+            return idxA < idxB;
+        } catch (...) {
+            // 如果解析失败，回退到普通排序
+            return a < b;
+        }
+    });
+
     int nImages = imageFilePaths.size();
     printAndLog("Found " + to_string(nImages) + " images. Starting SLAM system...");
 

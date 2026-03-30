@@ -24,7 +24,7 @@ VOC_FILE="../Vocabulary/ORBvoc.txt"
 SETTINGS_FILE="landmarkslam_real.yaml"
 
 # 3. 图像数据集文件夹路径 (请在这里修改为你的实际图像文件夹)
-IMAGE_FOLDER="/home/zah/ORB_SLAM3-master/landmarkslam/data/capture_1774599243" 
+IMAGE_FOLDER="/home/zah/ORB_SLAM3-master/landmarkslam/data/capture_1774599243/black_data" 
 
 # 如果运行脚本时带了参数，可以直接用传入的参数覆盖原来的图片路径
 if [ "$#" -eq 1 ]; then
