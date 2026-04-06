@@ -63,6 +63,8 @@ def extract_subpixel_orthogonal_lines(image, roi_bbox, mprint, frame_name="debug
     image: 输入的 BGR 原始图像矩阵
     roi_bbox: YOLO 检测出的边界框 [u_min, v_min, u_max, v_max]，用于过滤背景杂线
     mprint: 日志打印回调函数
+    frame_name: 当前处理的图像文件名，用于落盘命名
+    out_dir: 中间结果可视化落盘目录
     """
     scale_factor = 2.5 # 图像无损放大倍数。通过放大，让 LSD 算法能在更大的像素网格上跑，从而榨取亚像素级别的边缘梯度
     angle_tol = 15     # 几何容差。只要线段的角度偏差超过绝对水平/垂直 15 度，就视为干扰(树枝/撇捺)并抛弃
@@ -94,12 +96,28 @@ def extract_subpixel_orthogonal_lines(image, roi_bbox, mprint, frame_name="debug
     horiz_lines, vert_lines = [], [] 
     raw_count = len(lines_up) if lines_up is not None else 0
     mprint(f"    ├─ [LSD 原始提取]: 升维(x{scale_factor})后共发现 {raw_count} 条微观梯度线")
+
+    # ==========================
+    # 🚀 中间结果可视化环境搭建 
+    # ==========================
+    if out_dir is not None:
+        debug_raw_img = image.copy()
+        debug_filtered_img = image.copy()
+        # 预先画出 YOLO 检测框作为背景参考
+        if roi_bbox is not None:
+            xmin, ymin, xmax, ymax = map(int, roi_bbox)
+            cv2.rectangle(debug_raw_img, (xmin, ymin), (xmax, ymax), (255, 0, 0), 2)
+            cv2.rectangle(debug_filtered_img, (xmin, ymin), (xmax, ymax), (255, 0, 0), 2)
     
     if lines_up is not None: 
         for line in lines_up: 
             # 【核心操作】将提取到的坐标除以放大倍数，强行缩放回原图尺寸，此时的 x,y 会变成带小数点的浮点数，实现“亚像素”
             x1, y1, x2, y2 = line[0] / scale_factor 
             
+            # 【可视化 1】绘制未经任何过滤的“所有微观线段”（橘黄色），向导师展示原始检测状态
+            if out_dir is not None:
+                cv2.line(debug_raw_img, (int(x1), int(y1)), (int(x2), int(y2)), (0, 165, 255), 1)
+
             # 【空间掩码过滤】只有线段的中点落在 YOLO 检测框 roi_bbox 内部时，才被认为是标志牌上的文字线段
             if roi_bbox is not None:
                 xmin, ymin, xmax, ymax = roi_bbox 
@@ -118,11 +136,30 @@ def extract_subpixel_orthogonal_lines(image, roi_bbox, mprint, frame_name="debug
             # 横线判断：角度接近 0 度，或者接近 180 度
             if angle <= angle_tol or angle >= (180 - angle_tol):
                 horiz_lines.append((x1, y1, x2, y2, length)) 
+                # 【可视化 2】绘制清洗后的水平线（绿色）
+                if out_dir is not None:
+                    cv2.line(debug_filtered_img, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
             # 竖线判断：角度接近 90 度
             elif abs(angle - 90) <= angle_tol:
                 vert_lines.append((x1, y1, x2, y2, length))  
+                # 【可视化 3】绘制清洗后的垂直线（红色）
+                if out_dir is not None:
+                    cv2.line(debug_filtered_img, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 2)
                 
     mprint(f"    └─ [双主轴正交聚类]: 过滤背景与撇捺后，保留有效横线 {len(horiz_lines)} 条，竖线 {len(vert_lines)} 条")
+
+    # ==========================
+    # 🚀 中间结果物理落盘保存 
+    # ==========================
+    if out_dir is not None:
+        base_name = os.path.splitext(os.path.basename(frame_name))[0]
+        raw_path = os.path.join(out_dir, f"{base_name}_01_raw_lines.png")
+        filtered_path = os.path.join(out_dir, f"{base_name}_02_filtered_lines.png")
+        cv2.imwrite(raw_path, debug_raw_img)
+        cv2.imwrite(filtered_path, debug_filtered_img)
+        mprint(f"    ├─ [导师验收落盘]: 原始全图线段(抗扰度展示) -> {raw_path}")
+        mprint(f"    └─ [导师验收落盘]: 清洁正交特征(结构流形展示) -> {filtered_path}")
+
     return horiz_lines, vert_lines
 
 # =========================================================
@@ -547,8 +584,14 @@ def main():
 
             mprint(f"\n⚙️ 解构高维特征系: {img_name} (尺度 {bbox_width:.1f} px)")
             
-            # 开启 LSD 对画面提取局部的亚像素正交约束特征
-            h_lines, v_lines = extract_subpixel_orthogonal_lines(img, roi_bbox=bbox, mprint=mprint)
+            # 🚀 开启 LSD 对画面提取局部的亚像素正交约束特征，并传递参数触发中间渲染结果落盘
+            h_lines, v_lines = extract_subpixel_orthogonal_lines(
+                img, 
+                roi_bbox=bbox, 
+                mprint=mprint, 
+                frame_name=img_name, 
+                out_dir=DEBUG_OUT_DIR
+            )
             
             # [暂定 Placeholder] 提取外轮廓顶点。未来将替换为 Canny 求交提取法解决尺度漂移。
             obs_corners = np.array([[bbox[0], bbox[1]], [bbox[2], bbox[1]], [bbox[2], bbox[3]], [bbox[0], bbox[3]]])
@@ -570,7 +613,13 @@ def main():
         
         if img is not None:
             mprint(f"⚠️ 触发安全底线：被迫提取模糊锚点帧 {img_name} 以进行劣质态势估算。")
-            h_lines, v_lines = extract_subpixel_orthogonal_lines(img, roi_bbox=last_f['bbox'], mprint=mprint)
+            h_lines, v_lines = extract_subpixel_orthogonal_lines(
+                img, 
+                roi_bbox=last_f['bbox'], 
+                mprint=mprint, 
+                frame_name=img_name, 
+                out_dir=DEBUG_OUT_DIR
+            )
             obs_corners = np.array([[last_f['bbox'][0], last_f['bbox'][1]], [last_f['bbox'][2], last_f['bbox'][1]], 
                                     [last_f['bbox'][2], last_f['bbox'][3]], [last_f['bbox'][0], last_f['bbox'][3]]])
             last_f.update({'corners': obs_corners, 'h_lines': h_lines, 'v_lines': v_lines})
