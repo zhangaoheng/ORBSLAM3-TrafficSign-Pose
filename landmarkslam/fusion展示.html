@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Looming + LM 6-DoF 融合定位系统说明书</title>
+    
+    <script>
+        MathJax = {
+            tex: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']],
+                displayMath: [['$$', '$$'], ['\\[', '\\]']]
+            },
+            svg: {
+                fontCache: 'global'
+            }
+        };
+    </script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <style>
+        :root {
+            --primary-bg: #f8f9fa;
+            --sidebar-bg: #2c3e50;
+            --text-main: #333;
+            --accent: #3498db;
+            --accent-hover: #2980b9;
+            --card-bg: #ffffff;
+            --border-radius: 8px;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            display: flex;
+            background-color: var(--primary-bg);
+            color: var(--text-main);
+            line-height: 1.6;
+        }
+        /* 侧边栏导航 */
+        .sidebar {
+            width: 250px;
+            background-color: var(--sidebar-bg);
+            color: white;
+            height: 100vh;
+            position: fixed;
+            overflow-y: auto;
+            padding-top: 20px;
+        }
+        .sidebar h2 {
+            text-align: center;
+            font-size: 1.2rem;
+            margin-bottom: 30px;
+            border-bottom: 1px solid #455a64;
+            padding-bottom: 10px;
+        }
+        .sidebar a {
+            display: block;
+            color: #ecf0f1;
+            padding: 12px 20px;
+            text-decoration: none;
+            transition: 0.3s;
+        }
+        .sidebar a:hover {
+            background-color: #34495e;
+            border-left: 4px solid var(--accent);
+        }
+        /* 主内容区 */
+        .content {
+            margin-left: 250px;
+            padding: 40px;
+            flex-grow: 1;
+            max-width: 1200px;
+        }
+        h1 { color: #2c3e50; border-bottom: 3px solid var(--accent); padding-bottom: 10px; }
+        h2 { color: #2980b9; margin-top: 40px; }
+        h3 { color: #16a085; }
+        /* 卡片式设计 */
+        .card {
+            background: var(--card-bg);
+            border-radius: var(--border-radius);
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            border-left: 5px solid var(--accent);
+        }
+        .card.theory { border-left-color: #e74c3c; }
+        .card.function { border-left-color: #2ecc71; }
+        
+        .code-inline {
+            background-color: #f1f2f6;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Courier New', Courier, monospace;
+            color: #e84393;
+        }
+        .flow-box {
+            display: inline-block;
+            background: var(--sidebar-bg);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 5px;
+            margin: 5px;
+        }
+        .arrow { font-size: 20px; color: var(--accent); font-weight: bold; }
+        table {
+            width: 100%; border-collapse: collapse; margin-top: 15px;
+            background-color: white;
+        }
+        th, td {
+            border: 1px solid #ddd; padding: 12px; text-align: left;
+        }
+        th { background-color: #f4f4f4; color: #2c3e50;}
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <h2>🚀 V1.2 Baseline 导航</h2>
+        <a href="#abstract">📌 系统摘要</a>
+        <a href="#pipeline">🔄 主管线逻辑 (Pipeline)</a>
+        <a href="#frontend">👁️ 前端：特征提取模块</a>
+        <a href="#geometry">📐 中端：投影几何模块</a>
+        <a href="#backend">🧠 后端：LM 图优化模块</a>
+        <a href="#paper-mapping">📝 学术论文理论映射</a>
+    </div>
+
+    <div class="content">
+        <h1 id="abstract">Looming Depth + LM 6-DoF 融合定位系统</h1>
+        <p><strong>实验目标：</strong> 解决纯单目相机在远距离目标定位时的“尺度模糊（Scale Ambiguity）”与“姿态不可观测（Unobservable Pose）”难题。为双目立体视觉对比实验提供极限单目 Baseline。</p>
+
+        <div class="card theory">
+            <h3>💡 核心创新思想 (The Big Idea)</h3>
+            <p>1. <strong>尺度恢复：</strong> 利用运动学时序膨胀（Looming Effect）提取绝对物理深度 $Z_{final}$，作为优化器的刚性先验金锚。<br>
+            2. <strong>姿态死锁：</strong> 突破传统点/线特征，首创“汉字结构逆向映射机制”。利用汉字在 3D 物理空间必须“横平竖直”的常识，强压微小偏航角(Yaw)与俯仰角(Pitch)。</p>
+        </div>
+
+        <hr>
+
+        <h2 id="pipeline">🔄 主管线执行逻辑 (The <span class="code-inline">main</span> Pipeline)</h2>
+        <p>代码在 <code>main()</code> 函数中按照以下 5 个阶段严格串行执行：</p>
+        
+        <div style="text-align: center; margin: 30px 0;">
+            <div class="flow-box">Step 1: 时空对齐与 ROI 提取</div> <span class="arrow">➔</span>
+            <div class="flow-box">Step 2: Looming 深度解算</div> <span class="arrow">➔</span>
+            <div class="flow-box">Step 3: 提取汉字纹理 & 计算初值</div> <br><br><span class="arrow">⬇</span><br><br>
+            <div class="flow-box" style="background-color: #16a085;">Step 5: 三视图与 3D 态势导出</div> <span class="arrow">⬅</span>
+            <div class="flow-box" style="background-color: #e74c3c;">Step 4: LM 五大约束图优化炼丹</div>
+        </div>
+
+        <table>
+            <tr><th>阶段</th><th>核心任务</th><th>输出数据</th></tr>
+            <tr>
+                <td>Step 1</td>
+                <td>将 SLAM 轨迹的时间戳与 YOLO 识别框对齐，调用 <code>extract_optical_projection_hw</code> 榨取亚像素极值边框。</td>
+                <td><code>frames_data</code> (包含物理 Bbox、SLAM 位姿 $T_{WC}$)</td>
+            </tr>
+            <tr>
+                <td>Step 2</td>
+                <td>利用近大远小原理，计算连续帧的宽高膨胀率，利用交叉验证过滤噪声，锁定最终绝对深度。</td>
+                <td><code>looming_convergence.csv</code>, $final\_z\_looming$</td>
+            </tr>
+            <tr>
+                <td>Step 3</td>
+                <td>将前段帧定为 <code>blur_frames</code>；后两帧调用 <code>extract_subpixel_orthogonal_lines</code> 提取红绿笔画放入 <code>clear_frames</code>。利用 Looming 深度反推绝佳初值 $x_0$。</td>
+                <td>优化器所需的分类燃料，初始姿态 $x_0$</td>
+            </tr>
+            <tr>
+                <td>Step 4</td>
+                <td>启动 <code>scipy.optimize.least_squares</code>，送入 <code>joint_residuals</code> 进行多源残差压榨。</td>
+                <td><code>final_6dof_pose.txt</code> (终极姿态对标文件)</td>
+            </tr>
+        </table>
+
+        <hr>
+
+        <h2 id="frontend">👁️ 前端函数：特征榨取 (Frontend Extraction)</h2>
+        
+        <div class="card function">
+            <h3>🛠️ <code>extract_optical_projection_hw()</code></h3>
+            <p><strong>作用：</strong> Looming 亚像素边缘提取器。踢除 YOLO 的语义抖动，寻找真实的刚体物理边界。</p>
+            <ul>
+                <li><strong>内部调用：</strong> <code>cv2.createCLAHE</code>, <code>cv2.createLineSegmentDetector</code></li>
+                <li><strong>核心逻辑：</strong> 外扩 ROI -> CLAHE 抗逆光增强 -> LSD 提取线段 -> 空间极大极小值挤压。</li>
+                <li><strong>可视化输出：</strong> <code>_looming_1_roi_gray.jpg</code>, <code>_looming_2_lsd_red.jpg</code>, <code>_looming_3_bbox_green.jpg</code></li>
+            </ul>
+        </div>
+
+        <div class="card function">
+            <h3>🛠️ <code>extract_subpixel_orthogonal_lines()</code></h3>
+            <p><strong>作用：</strong> 汉字结构线段提取。为后端的“正交约束”提供弹药。</p>
+            <ul>
+                <li><strong>内部调用：</strong> Gamma LUT, <code>cv2.resize</code> (双三次插值), <code>cv2.GaussianBlur</code>, <code>atan2</code></li>
+                <li><strong>核心逻辑：</strong> Gamma 极限提亮暗部 -> 放大 2.5 倍制造平滑梯度 -> LSD 寻线 -> 利用 <code>atan2</code> 按照角度分为横线 (0°/180°) 和竖线 (90°)。</li>
+            </ul>
+        </div>
+
+        <hr>
+
+        <h2 id="geometry">📐 中端函数：投影与映射 (Geometry Engine)</h2>
+
+        <div class="card function">
+            <h3>🛠️ <code>project_to_pixel()</code></h3>
+            <p><strong>作用：</strong> 正向针孔透视投影 (3D -> 2D)。</p>
+            <p><strong>数学公式：</strong> 
+                $$ \mathbf{P}_c = \mathbf{T}_{CW} \cdot (\mathbf{R}_{WS} \cdot \mathbf{P}_s + \mathbf{t}_{WS}) $$
+                $$ u = f_x \frac{X_c}{Z_c} + c_x \quad , \quad v = f_y \frac{Y_c}{Z_c} + c_y $$
+            </p>
+        </div>
+
+        <div class="card function">
+            <h3>🛠️ <code>get_inverse_homography()</code> & <code>pixel_to_sign_plane()</code></h3>
+            <p><strong>作用：</strong> 逆向单应映射 (2D -> 3D 平板)。</p>
+            <p><strong>理论映射：</strong> 因为标志牌是一个平面（局部坐标 $Z_s = 0$），我们可以将 3D 相机投影矩阵抽离 Z 轴列，降维成一个 $3 \times 3$ 的单应矩阵 $\mathbf{H}$。对其求逆 $\mathbf{H}^{-1}$，就可以把照片上的像素“像放幻灯片一样”反贴回 3D 铁皮表面，计算其真实的物理尺寸（米）。</p>
+        </div>
+
+        <hr>
+
+        <h2 id="backend">🧠 后端函数：LM 图优化与惩罚 (Backend Optimization)</h2>
+
+        <div class="card theory">
+            <h3>⚖️ <code>joint_residuals(x, ...)</code> 目标代价函数</h3>
+            <p>优化器不断改变状态向量 $x = [t_x, t_y, t_z, r_x, r_y, r_z]$，使得以下五大残差（Residuals）平方和最小化：</p>
+            
+            <ol>
+                <li><strong>约束 A (W_REPROJ): 角点重投影残差</strong> <br>
+                    计算投影出的虚拟角点与前端挤压出的亚像素绿框角点的像素欧氏距离。</li>
+                <li><strong>约束 B (W_ORTHO): 汉字正交形态死锁 (核心创新)</strong> <br>
+                    利用 <code>pixel_to_sign_plane</code> 将 2D 笔画贴回 3D 平板。<br>
+                    横线残差 = $|Y_{physical\_1} - Y_{physical\_2}|$ (要求绝对水平)<br>
+                    竖线残差 = $|X_{physical\_1} - X_{physical\_2}|$ (要求绝对垂直)
+                </li>
+                <li><strong>约束 C (W_BBOX): 视锥宏观托底</strong> <br>
+                    投影的边界框必须大致包裹在 YOLO 框内（防止发散）。</li>
+                <li><strong>约束 D (W_STRUCT): 物理大楼共面托底</strong> <br>
+                    $E = \mathbf{n} \cdot \mathbf{t}_{WS} + d$。强制标志牌贴合 SLAM 计算的背景墙面。</li>
+                <li><strong>约束 E (W_LOOMING): 绝对深度抛锚</strong> <br>
+                    $E = (\mathbf{t}_{WS} - \mathbf{t}_{cam}) \cdot \vec{Z}_{cam} - Z_{looming\_final}$。优化器猜想的 3D 深度必须锁死在第一阶段算出的绝对 Looming 深度金锚上！</li>
+            </ol>
+        </div>
+
+        <hr>
+
+        <h2 id="paper-mapping">📝 学术论文理论映射 (Paper Contribution Mapping)</h2>
+        <p>未来撰写学术论文时，可依据此模块构建核心 Method 章节的 Contributions：</p>
+        
+        <table style="margin-bottom: 50px;">
+            <tr>
+                <th>代码运行模块</th>
+                <th>对应的学术概念与机制 (Keywords)</th>
+                <th>解决的传统单目 SLAM 痛点</th>
+            </tr>
+            <tr>
+                <td>Phase 1: Looming 解算</td>
+                <td>Time-to-Collision (TTC), Scale Recovery, Kinematic Looming Effect</td>
+                <td>单目 SLAM 系统在缺乏 IMU 时无法获取真实世界绝对尺度 (Scale Ambiguity)。</td>
+            </tr>
+            <tr>
+                <td>Phase 2: LSD + 极值挤压</td>
+                <td>Sub-pixel Edge Extraction, Spatial Extrema Optimization</td>
+                <td>深度学习 Bounding Box 存在严重的“语义边缘抖动 (Semantic Jitter)”，无法直接作为几何角点。</td>
+            </tr>
+            <tr>
+                <td>Phase 3: 汉字正交残差</td>
+                <td>Inverse Homography Mapping, Texture Orthogonal Constraint, Decoupled 6-DoF Optimization</td>
+                <td>远距离目标由于透视效应极弱，导致偏航角(Yaw)与俯仰角(Pitch)在数学上处于不可观测状态 (Unobservable/Degenerate)。</td>
+            </tr>
+        </table>
+        
+        <p style="text-align: center; color: #bdc3c7; font-size: 0.9em;">
+            Compiled for High-Precision Stereo-Vision Baseline Test 🚀 | Happy Coding!
+        </p>
+    </div>
+</body>
+</html>
