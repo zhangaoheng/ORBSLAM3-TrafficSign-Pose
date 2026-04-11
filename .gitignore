@@ -26,6 +26,7 @@ landmarkslam/data/
 *.png
 *.ply
 *.jpg
+*.npy
 
 # === 4. 庞大的 Python 虚拟环境 ===
 landmarkslam/yolo_venv/

@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>FOE 算法验证 - 极简稳定版</title>
+    <style>
+        body { margin: 0; padding: 0; background: #111; color: #fff; font-family: sans-serif; display: flex; height: 100vh; overflow: hidden; }
+        #render-area { flex: 1; position: relative; }
+        #ui-panel { width: 380px; background: #222; padding: 20px; box-sizing: border-box; overflow-y: auto; border-left: 2px solid #444; z-index: 10; }
+        #foe-cross { position: absolute; top: 50%; left: 50%; width: 30px; height: 30px; transform: translate(-50%, -50%); pointer-events: none; }
+        #foe-cross::before { content:''; position:absolute; top:14px; left:0; width:30px; height:2px; background:red; }
+        #foe-cross::after { content:''; position:absolute; top:0; left:14px; width:2px; height:30px; background:red; }
+        .foe-text { position: absolute; top: 50%; left: 50%; transform: translate(20px, 20px); color: red; font-weight: bold; pointer-events: none; }
+        .label { font-size: 14px; color: #aaa; margin-bottom: 5px; display: flex; justify-content: space-between;}
+        input[type=range] { width: 100%; margin-bottom: 25px; }
+        .data-box { background: #333; padding: 15px; border-radius: 8px; margin-top: 15px; font-family: monospace; font-size: 15px; line-height: 1.8; }
+        .highlight { color: #00ff00; font-weight: bold; font-size: 20px; }
+    </style>
+</head>
+<body>
+    <div id="render-area">
+        <div id="foe-cross"></div>
+        <div class="foe-text">FOE (膨胀焦点)</div>
+    </div>
+    <div id="ui-panel">
+        <h2 style="color: #38bdf8; margin-top: 0;">点级 FOE 深度解算</h2>
+        <p style="font-size: 12px; color: #888;">测试偏置变量 $X$ 是否影响最终 $Z$ 值</p>
+
+        <div class="label"><span>标志牌侧向偏移 (X Offset)</span> <span id="val-x" style="color: #f59e0b;">5.0 m</span></div>
+        <input type="range" id="slider-x" min="2" max="15" step="0.5" value="5">
+        
+        <div class="label"><span>车辆向前行驶 (Δd)</span> <span id="val-d" style="color: #38bdf8;">0.0 m</span></div>
+        <input type="range" id="slider-d" min="0" max="20" step="0.5" value="0">
+
+        <div class="data-box">
+            物理真实深度 Z: <span id="text-z-true">30.00</span> m<br>
+            <hr style="border: 0; border-top: 1px solid #555;">
+            当前像素偏移 r: <span id="text-r">166.67</span> px<br>
+            像素膨胀差 Δr: <span id="text-dr">0.00</span> px<br>
+            <hr style="border: 0; border-top: 1px solid #555;">
+            算法推导公式:<br>
+            <span style="color: #888;">Z_calc = (r * Δd) / Δr</span><br><br>
+            解算结果 Z_calc:<br>
+            <span id="text-z-calc" class="highlight">等待向前行驶...</span>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // 将所有逻辑包裹在 onload 中，确保 DOM 绝对加载完毕再执行，杜绝白屏黑屏！
+        window.onload = function() {
+            const container = document.getElementById('render-area');
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a1a1a);
+
+            // 初始化相机
+            const camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 1000);
+            camera.position.set(0, 1.5, 0);
+            camera.lookAt(0, 1.5, -100);
+
+            // 初始化渲染器
+            const renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            container.appendChild(renderer.domElement);
+
+            // 添加车道网格
+            const grid = new THREE.GridHelper(200, 100, 0x555555, 0x333333);
+            scene.add(grid);
+
+            // 添加路边的标志牌
+            const signGeo = new THREE.PlaneGeometry(3, 2);
+            const signMat = new THREE.MeshBasicMaterial({ color: 0x3b82f6, side: THREE.DoubleSide });
+            const sign = new THREE.Mesh(signGeo, signMat);
+            const edges = new THREE.EdgesGeometry(signGeo);
+            const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0xffffff }));
+            sign.add(line);
+            scene.add(sign);
+
+            // 绘制连接中心到标志牌的红色射线 (展示 r)
+            const rayMat = new THREE.LineBasicMaterial({ color: 0xff0000 });
+            const rayGeo = new THREE.BufferGeometry().setFromPoints([camera.position, new THREE.Vector3()]);
+            const ray = new THREE.Line(rayGeo, rayMat);
+            scene.add(ray);
+
+            const z_init = 30; // 初始距离固定 30 米
+            const focal = 1000; // 模拟焦距
+
+            function update() {
+                const x_offset = parseFloat(document.getElementById('slider-x').value);
+                const delta_d = parseFloat(document.getElementById('slider-d').value);
+                const z_current = z_init - delta_d;
+
+                // 更新 3D 模型位置 (高度设为1.5和相机齐平，屏蔽Y轴干扰，让你只看X轴侧偏的影响)
+                sign.position.set(x_offset, 1.5, -z_current);
+                
+                // 更新射线
+                ray.geometry.setFromPoints([
+                    new THREE.Vector3(0, 1.5, 0),
+                    new THREE.Vector3(x_offset, 1.5, -z_current)
+                ]);
+
+                // ------ 核心代数逻辑 ------
+                // t0 时刻的像素偏移量 r0
+                const r_0 = focal * (x_offset / z_init);
+                // 当前时刻的像素偏移量 r_new
+                const r_new = focal * (x_offset / z_current);
+                // 向外飞逸的膨胀差 Δr
+                const delta_r = r_new - r_0;
+
+                // 代入点级解算公式
+                let z_calc = "等待向前行驶...";
+                if (delta_d > 0.01) {
+                    z_calc = ((r_new * delta_d) / delta_r).toFixed(2) + " m";
+                }
+
+                // ------ 更新 UI 界面 ------
+                document.getElementById('val-x').innerText = x_offset.toFixed(1) + " m";
+                document.getElementById('val-d').innerText = delta_d.toFixed(1) + " m";
+                document.getElementById('text-z-true').innerText = z_current.toFixed(2);
+                document.getElementById('text-r').innerText = r_new.toFixed(2);
+                document.getElementById('text-dr').innerText = delta_r.toFixed(2);
+                
+                const calcEl = document.getElementById('text-z-calc');
+                calcEl.innerText = z_calc;
+                calcEl.style.color = delta_d > 0.01 ? "#00ff00" : "#aaaaaa";
+
+                renderer.render(scene, camera);
+            }
+
+            // 绑定滑块事件
+            document.getElementById('slider-x').addEventListener('input', update);
+            document.getElementById('slider-d').addEventListener('input', update);
+
+            // 监听窗口大小变化防崩溃
+            window.addEventListener('resize', () => {
+                camera.aspect = container.clientWidth / container.clientHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(container.clientWidth, container.clientHeight);
+                renderer.render(scene, camera);
+            });
+
+            // 启动初始化渲染
+            update();
+        };
+    </script>
+</body>
+</html>

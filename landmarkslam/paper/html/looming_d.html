@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SLAM 几何基准演示：Z_looming 与正交距离 d</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; height: 100vh; background-color: #f5f7fa; }
+        #canvas-container { flex: 1; position: relative; }
+        #ui-panel { width: 380px; background: white; box-shadow: -2px 0 10px rgba(0,0,0,0.1); display: flex; flex-direction: column; z-index: 10; border-left: 1px solid #e2e8f0; }
+        .header { background: #1e293b; color: white; padding: 20px; text-align: center; }
+        .header h2 { margin: 0; font-size: 1.2rem; font-weight: 600; }
+        .header p { margin: 5px 0 0 0; font-size: 0.85rem; opacity: 0.8; }
+        .control-group { padding: 20px; border-bottom: 1px solid #e2e8f0; }
+        .control-item { margin-bottom: 15px; }
+        .control-item label { display: flex; justify-content: space-between; font-weight: 500; font-size: 0.9rem; color: #334155; margin-bottom: 8px; }
+        input[type=range] { width: 100%; cursor: pointer; }
+        .data-panel { padding: 20px; flex: 1; background: #f8fafc; overflow-y: auto; }
+        .data-box { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        .data-title { font-size: 0.85rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 10px; letter-spacing: 0.5px; }
+        .math-text { font-family: 'Courier New', Courier, monospace; font-size: 0.95rem; color: #0f172a; margin: 5px 0; }
+        .highlight-d { color: #10b981; font-weight: bold; font-size: 1.2rem; }
+        .highlight-z { color: #3b82f6; font-weight: bold; }
+        .conclusion { padding: 15px; background: #eff6ff; border-left: 4px solid #3b82f6; color: #1e3a8a; font-size: 0.9rem; line-height: 1.5; border-radius: 0 4px 4px 0; }
+        
+        /* 3D 场景中的浮动标签 */
+        .label3d { position: absolute; background: rgba(255,255,255,0.9); padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; pointer-events: none; transform: translate(-50%, -50%); box-shadow: 0 1px 3px rgba(0,0,0,0.2); transition: top 0.1s, left 0.1s; }
+        #label-p { color: #3b82f6; border: 1px solid #3b82f6; }
+        #label-q { color: #10b981; border: 1px solid #10b981; }
+        #label-cam { color: #64748b; border: 1px solid #cbd5e1; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+    <div id="canvas-container">
+        <div id="label-cam" class="label3d">Camera (0,0,0)</div>
+        <div id="label-p" class="label3d">标志牌中心 P</div>
+        <div id="label-q" class="label3d">正交投影点 Q</div>
+    </div>
+
+    <div id="ui-panel">
+        <div class="header">
+            <h2>单目 SLAM 几何基准推导</h2>
+            <p>光轴深度 Z 与 平面正交距离 d</p>
+        </div>
+
+        <div class="control-group">
+            <div class="control-item">
+                <label><span>标志牌偏航角 (Yaw)</span> <span id="val-yaw">0°</span></label>
+                <input type="range" id="slider-yaw" min="-60" max="60" value="0" step="1">
+            </div>
+            <div class="control-item">
+                <label><span>标志牌横向偏移 (X_c)</span> <span id="val-x">0 m</span></label>
+                <input type="range" id="slider-x" min="-5" max="5" value="0" step="0.1">
+            </div>
+        </div>
+
+        <div class="data-panel">
+            <div class="data-box">
+                <div class="data-title">1. 状态参数 (物理空间)</div>
+                <div class="math-text">光轴深度 (Z_looming): <span class="highlight-z">10.00 m</span></div>
+                <div class="math-text">中心坐标 (X_c): <span id="text-xc">0.00</span> m</div>
+                <div class="math-text" style="color: #ef4444;">法向量 n: [<span id="text-nx">0.00</span>, 0.00, <span id="text-nz">1.00</span>]</div>
+            </div>
+
+            <div class="data-box">
+                <div class="data-title">2. 核心代数推导 (单应矩阵所需)</div>
+                <div style="font-size: 0.85rem; color: #64748b; margin-bottom: 5px;">公式: d = | n_x·X_c + n_y·Y_c + n_z·Z_c |</div>
+                <div class="math-text">d = | (<span id="calc-nx">0.00</span>)*(<span id="calc-xc">0.00</span>) + 0 + (<span id="calc-nz">1.00</span>)*(-10.00) |</div>
+                <div class="math-text">d = <span class="highlight-d" id="text-d">10.00 m</span></div>
+            </div>
+
+            <div class="conclusion" id="text-conclusion">
+                <strong>正交状态：</strong><br>标志牌位于画面正中央且完全正对相机。此时光轴深度 Z 完美等于正交距离 d。
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 1. 初始化 Three.js 场景
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color('#f1f5f9');
+        scene.add(new THREE.GridHelper(20, 20, 0x94a3b8, 0xe2e8f0));
+
+        // 观察者相机 (用于全方位查看 3D 场景)
+        const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
+        camera.position.set(12, 8, 12);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 0, -5);
+        controls.update();
+
+        // 2. 构建 3D 几何实体
+        
+        // A. 模拟相机 (位于原点)
+        const camGroup = new THREE.Group();
+        const camBody = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.8), new THREE.MeshBasicMaterial({color: 0x334155}));
+        const camLens = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.3, 0.4, 16), new THREE.MeshBasicMaterial({color: 0x1e293b}));
+        camLens.rotation.x = Math.PI / 2;
+        camLens.position.z = -0.6;
+        camGroup.add(camBody);
+        camGroup.add(camLens);
+        scene.add(camGroup);
+
+        // 光轴 (Z轴负方向)
+        const zAxisMat = new THREE.LineDashedMaterial({ color: 0x94a3b8, dashSize: 0.5, gapSize: 0.3 });
+        const zAxisGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-15)]);
+        const zAxis = new THREE.Line(zAxisGeo, zAxisMat);
+        zAxis.computeLineDistances();
+        scene.add(zAxis);
+
+        // B. 标志牌 (Plane)
+        const signGroup = new THREE.Group();
+        const signMesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(4, 3),
+            new THREE.MeshBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.5, side: THREE.DoubleSide })
+        );
+        // 添加边框使其更像标志牌
+        const edges = new THREE.EdgesGeometry(new THREE.PlaneGeometry(4, 3));
+        const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0xb45309, linewidth: 2 }));
+        signGroup.add(signMesh);
+        signGroup.add(line);
+
+        // 法向量箭头
+        const normalArrow = new THREE.ArrowHelper(new THREE.Vector3(0,0,1), new THREE.Vector3(0,0,0), 2, 0xef4444, 0.4, 0.3);
+        signGroup.add(normalArrow);
+        scene.add(signGroup);
+
+        // C. 动态线条 (视线 Z 和 垂距 d)
+        const lineP_geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,0)]);
+        const lineP = new THREE.Line(lineP_geo, new THREE.LineBasicMaterial({ color: 0x3b82f6, linewidth: 3 })); // 蓝线
+        scene.add(lineP);
+
+        const lineQ_geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,0)]);
+        const lineQ = new THREE.Line(lineQ_geo, new THREE.LineBasicMaterial({ color: 0x10b981, linewidth: 3 })); // 绿线
+        scene.add(lineQ);
+
+        // 3. 核心代数与更新逻辑
+        const Z_looming = 10; // 固定光轴深度为 10 米
+
+        const sliderYaw = document.getElementById('slider-yaw');
+        const sliderX = document.getElementById('slider-x');
+        
+        let pointP = new THREE.Vector3();
+        let pointQ = new THREE.Vector3();
+
+        function updateMath() {
+            const yawDeg = parseFloat(sliderYaw.value);
+            const yawRad = yawDeg * Math.PI / 180;
+            const Xc = parseFloat(sliderX.value);
+
+            // 更新 UI 数值
+            document.getElementById('val-yaw').innerText = yawDeg + '°';
+            document.getElementById('val-x').innerText = Xc.toFixed(1) + ' m';
+            document.getElementById('text-xc').innerText = Xc.toFixed(2);
+            document.getElementById('calc-xc').innerText = Xc.toFixed(2);
+
+            // A. 更新标志牌位置 (P点)
+            // Z_c 在 Three.js 相机系里是负数，所以是 -Z_looming
+            pointP.set(Xc, 0, -Z_looming); 
+            signGroup.position.copy(pointP);
+            signGroup.rotation.y = yawRad;
+
+            // B. 计算法向量 n (由于绕 Y 轴旋转)
+            // Three.js 的 Plane 默认朝向 +Z。旋转 yaw 后，法向量改变
+            const nx = Math.sin(yawRad);
+            const ny = 0;
+            const nz = Math.cos(yawRad);
+            
+            document.getElementById('text-nx').innerText = nx.toFixed(2);
+            document.getElementById('calc-nx').innerText = nx.toFixed(2);
+            document.getElementById('text-nz').innerText = nz.toFixed(2);
+            document.getElementById('calc-nz').innerText = nz.toFixed(2);
+
+            // C. 核心推导：计算正交垂距 d
+            // 平面方程: n.x * X + n.y * Y + n.z * Z = D
+            // 因为 P 点在平面上，所以 D = n.dot(P)
+            const D = nx * pointP.x + ny * pointP.y + nz * pointP.z;
+            const d = Math.abs(D); // 垂距是绝对值
+            
+            document.getElementById('text-d').innerText = d.toFixed(2) + ' m';
+
+            // D. 计算正交投影点 Q
+            // Q 点是从原点沿法向量方向走 D 这么远
+            pointQ.set(nx * D, ny * D, nz * D);
+
+            // E. 更新线条渲染
+            lineP.geometry.setFromPoints([new THREE.Vector3(0,0,0), pointP]);
+            lineQ.geometry.setFromPoints([new THREE.Vector3(0,0,0), pointQ]);
+
+            // F. 更新结论文本
+            const conclusionEl = document.getElementById('text-conclusion');
+            if (Math.abs(Xc) < 0.1 && Math.abs(yawDeg) < 1) {
+                conclusionEl.innerHTML = "<strong>正交状态：</strong><br>标志牌位于画面正中央且完全正对相机。此时光轴深度 Z 完美等于正交距离 d。";
+                conclusionEl.style.borderLeftColor = "#3b82f6";
+                conclusionEl.style.backgroundColor = "#eff6ff";
+                conclusionEl.style.color = "#1e3a8a";
+            } else {
+                conclusionEl.innerHTML = "<strong>倾斜/偏移状态：</strong><br>绿色的正交垂距 (d) 脱离了蓝色的视线 (Z)。此时必须使用 <strong>d = n^T · X_c</strong> 的点积公式进行投影修正！";
+                conclusionEl.style.borderLeftColor = "#ef4444";
+                conclusionEl.style.backgroundColor = "#fef2f2";
+                conclusionEl.style.color = "#991b1b";
+            }
+        }
+
+        // 4. 处理 2D 标签追踪 3D 坐标
+        function updateLabels() {
+            const widthHalf = container.clientWidth / 2;
+            const heightHalf = container.clientHeight / 2;
+
+            function toScreenXY(position, elementId) {
+                const pos = position.clone();
+                pos.project(camera);
+                const el = document.getElementById(elementId);
+                // 判断是否在相机背后
+                if (pos.z > 1) {
+                    el.style.display = 'none';
+                    return;
+                }
+                el.style.display = 'block';
+                el.style.left = (pos.x * widthHalf + widthHalf) + 'px';
+                el.style.top = (-(pos.y * heightHalf) + heightHalf) + 'px';
+            }
+
+            toScreenXY(new THREE.Vector3(0, -0.8, 0), 'label-cam');
+            toScreenXY(pointP, 'label-p');
+            toScreenXY(pointQ, 'label-q');
+        }
+
+        // 事件监听
+        sliderYaw.addEventListener('input', updateMath);
+        sliderX.addEventListener('input', updateMath);
+        window.addEventListener('resize', () => {
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        });
+
+        // 动画循环
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+            updateLabels();
+        }
+
+        // 启动
+        updateMath();
+        animate();
+    </script>
+</body>
+</html>
