@@ -6,7 +6,7 @@ import os
 
 # 提取bag包
 # ================= 你的配置 =================
-BAG_FILE = "/home/zah/ORB_SLAM3-master/landmarkslam/data/20260410_200107.bag" 
+BAG_FILE = "/home/zah/ORB_SLAM3-master/landmarkslam/data/20260412_195304.bag" 
 SAVE_DIR = "/home/zah/ORB_SLAM3-master/landmarkslam/output/extracted_frames" 
 
 if not os.path.exists(SAVE_DIR):

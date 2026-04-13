@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>射影几何中心精度验证</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f0f4f8;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+        .dashboard {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 900px;
+            overflow: hidden;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 30px;
+            background: #ffffff;
+            border-bottom: 1px solid #e1e4e8;
+        }
+        .title-area h1 {
+            margin: 0 0 5px 0;
+            font-size: 22px;
+            color: #1a202c;
+        }
+        .title-area p {
+            margin: 0;
+            font-size: 14px;
+            color: #718096;
+        }
+        .stats-area {
+            display: grid;
+            grid-template-columns: auto auto auto;
+            gap: 20px;
+            text-align: center;
+        }
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #718096;
+            margin-bottom: 4px;
+        }
+        .stat-value {
+            font-size: 18px;
+            font-weight: bold;
+            font-family: monospace;
+        }
+        .error-bbox { color: #e53e3e; }
+        .error-algo { color: #38a169; }
+        
+        .canvas-container {
+            background-color: #e2e8f0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        canvas {
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+
+        .controls {
+            padding: 20px 30px;
+            background: #f8fafc;
+            border-top: 1px solid #e1e4e8;
+        }
+        .control-group {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .control-group label {
+            width: 100px;
+            font-weight: 500;
+        }
+        .control-group input[type="range"] {
+            flex-grow: 1;
+            margin: 0 15px;
+        }
+        .control-group input[type="number"] {
+            width: 60px;
+            padding: 5px;
+            border: 1px solid #cbd5e0;
+            border-radius: 4px;
+            text-align: center;
+        }
+        button {
+            width: 100%;
+            padding: 10px;
+            background-color: #e2e8f0;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            color: #4a5568;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background-color: #cbd5e0;
+        }
+    </style>
+</head>
+<body>
+
+<div class="dashboard">
+    <div class="header">
+        <div class="title-area">
+            <h1>射影几何中心精度验证</h1>
+            <p>透视投影验证：对角线交点始终锚定在物理中心</p>
+        </div>
+        <div class="stats-area">
+            <div class="stat-item">
+                <span class="stat-label">BBOX 中心漂移误差</span>
+                <span class="stat-value error-bbox" id="bbox-error">0.00 px</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">对角线交点误差</span>
+                <span class="stat-value error-algo" id="algo-error">0.00 px</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">当前视角 (偏航/俯仰)</span>
+                <span class="stat-value" id="angle-display">0° / 0°</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="canvas-container">
+        <canvas id="renderCanvas" width="800" height="550"></canvas>
+    </div>
+
+    <div class="controls">
+        <div class="control-group">
+            <label for="yawSlider">偏航角 (Yaw)</label>
+            <input type="range" id="yawSlider" min="-70" max="70" value="-30">
+            <input type="number" id="yawInput" min="-70" max="70" value="-30">
+        </div>
+        <div class="control-group">
+            <label for="pitchSlider">俯仰角 (Pitch)</label>
+            <input type="range" id="pitchSlider" min="-70" max="70" value="20">
+            <input type="number" id="pitchInput" min="-70" max="70" value="20">
+        </div>
+        <button id="resetBtn">重置视角</button>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('renderCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    const yawSlider = document.getElementById('yawSlider');
+    const yawInput = document.getElementById('yawInput');
+    const pitchSlider = document.getElementById('pitchSlider');
+    const pitchInput = document.getElementById('pitchInput');
+    const resetBtn = document.getElementById('resetBtn');
+    
+    const bboxErrorEl = document.getElementById('bbox-error');
+    const algoErrorEl = document.getElementById('algo-error');
+    const angleDisplay = document.getElementById('angle-display');
+
+    function syncInputs(slider, input) {
+        slider.addEventListener('input', () => { input.value = slider.value; draw(); });
+        input.addEventListener('input', () => { slider.value = input.value; draw(); });
+    }
+    syncInputs(yawSlider, yawInput);
+    syncInputs(pitchSlider, pitchInput);
+
+    resetBtn.addEventListener('click', () => {
+        yawSlider.value = -30; yawInput.value = -30;
+        pitchSlider.value = 20; pitchInput.value = 20;
+        draw();
+    });
+
+    // --- 核心修复区：调整 3D 相机参数 ---
+    const FOV = 600; 
+    const CAMERA_Z = 700; // 原来是 500。把相机往后拉，让视野更大
+    const BOARD_W = 140;  // 稍微缩小了一点标定板物理宽度
+    const BOARD_H = 180;  // 稍微缩小了一点标定板物理高度
+
+    function project3D(x, y, z, yawDeg, pitchDeg) {
+        let yaw = yawDeg * Math.PI / 180;
+        let pitch = pitchDeg * Math.PI / 180;
+
+        let y1 = y * Math.cos(pitch) - z * Math.sin(pitch);
+        let z1 = y * Math.sin(pitch) + z * Math.cos(pitch);
+
+        let x2 = x * Math.cos(yaw) + z1 * Math.sin(yaw);
+        let z2 = -x * Math.sin(yaw) + z1 * Math.cos(yaw);
+
+        z2 += CAMERA_Z;
+        if (z2 < 1) z2 = 1;
+
+        let xProj = (x2 * FOV) / z2 + canvas.width / 2;
+        let yProj = (y1 * FOV) / z2 + canvas.height / 2;
+
+        return { x: xProj, y: yProj };
+    }
+
+    function segmentIntersect(p1, p2, p3, p4) {
+        let det1 = (p1.x - p2.x) * (p3.y - p4.y);
+        let det2 = (p1.y - p2.y) * (p3.x - p4.x);
+        let denominator = det1 - det2;
+
+        if (denominator === 0) return { x: 0, y: 0 };
+
+        let d1 = (p1.x * p2.y - p1.y * p2.x);
+        let d2 = (p3.x * p4.y - p3.y * p4.x);
+
+        let x = (d1 * (p3.x - p4.x) - (p1.x - p2.x) * d2) / denominator;
+        let y = (d1 * (p3.y - p4.y) - (p1.y - p2.y) * d2) / denominator;
+
+        return { x: x, y: y };
+    }
+
+    function drawLabel(x, y, text, color, offset) {
+        ctx.font = "bold 12px sans-serif";
+        const padding = 8;
+        const width = ctx.measureText(text).width + padding * 2;
+        const height = 26;
+        const rX = x - width / 2;
+        const rY = y + offset;
+
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x, rY + (offset < 0 ? height : 0));
+        ctx.strokeStyle = color;
+        ctx.setLineDash([2, 2]);
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = "white";
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(rX, rY, width, height, 13);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = color;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(text, x, rY + height / 2);
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        let yaw = parseFloat(yawSlider.value);
+        let pitch = parseFloat(pitchSlider.value);
+
+        angleDisplay.textContent = `${yaw}° / ${pitch}°`;
+
+        let pTL = project3D(-BOARD_W, -BOARD_H, 0, yaw, pitch);
+        let pTR = project3D(BOARD_W, -BOARD_H, 0, yaw, pitch);
+        let pBR = project3D(BOARD_W, BOARD_H, 0, yaw, pitch);
+        let pBL = project3D(-BOARD_W, BOARD_H, 0, yaw, pitch);
+        
+        let gtCenter = project3D(0, 0, 0, yaw, pitch); 
+
+        // Draw internal grid 
+        ctx.strokeStyle = "#cbd5e0";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 5]);
+        for(let i=1; i<8; i++) {
+            let cx = -BOARD_W + (BOARD_W*2) * (i/8);
+            let pt1 = project3D(cx, -BOARD_H, 0, yaw, pitch);
+            let pt2 = project3D(cx, BOARD_H, 0, yaw, pitch);
+            ctx.beginPath(); ctx.moveTo(pt1.x, pt1.y); ctx.lineTo(pt2.x, pt2.y); ctx.stroke();
+        }
+        for(let i=1; i<11; i++) {
+            let cy = -BOARD_H + (BOARD_H*2) * (i/11);
+            let pt1 = project3D(-BOARD_W, cy, 0, yaw, pitch);
+            let pt2 = project3D(BOARD_W, cy, 0, yaw, pitch);
+            ctx.beginPath(); ctx.moveTo(pt1.x, pt1.y); ctx.lineTo(pt2.x, pt2.y); ctx.stroke();
+        }
+        ctx.setLineDash([]);
+
+        // Fill distorted board background
+        ctx.fillStyle = "rgba(226, 232, 240, 0.4)";
+        ctx.beginPath();
+        ctx.moveTo(pTL.x, pTL.y); ctx.lineTo(pTR.x, pTR.y);
+        ctx.lineTo(pBR.x, pBR.y); ctx.lineTo(pBL.x, pBL.y);
+        ctx.closePath();
+        ctx.fill();
+
+        // Algorithm A: Traditional BBox
+        let minX = Math.min(pTL.x, pTR.x, pBR.x, pBL.x);
+        let maxX = Math.max(pTL.x, pTR.x, pBR.x, pBL.x);
+        let minY = Math.min(pTL.y, pTR.y, pBR.y, pBL.y);
+        let maxY = Math.max(pTL.y, pTR.y, pBR.y, pBL.y);
+        
+        let bboxCenter = { x: (minX + maxX)/2, y: (minY + maxY)/2 };
+
+        ctx.strokeStyle = "rgba(229, 62, 62, 0.8)"; 
+        ctx.lineWidth = 2;
+        ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
+        
+        ctx.fillStyle = "#e53e3e";
+        ctx.beginPath(); ctx.arc(bboxCenter.x, bboxCenter.y, 5, 0, Math.PI*2); ctx.fill();
+        drawLabel(bboxCenter.x, bboxCenter.y, "BBOX 中心", "#e53e3e", -38);
+
+        // Algorithm B: Diagonal Intersect
+        let algoCenter = segmentIntersect(pTL, pBR, pTR, pBL);
+
+        ctx.strokeStyle = "rgba(56, 161, 105, 0.8)"; 
+        ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.moveTo(pTL.x, pTL.y); ctx.lineTo(pBR.x, pBR.y); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(pTR.x, pTR.y); ctx.lineTo(pBL.x, pBL.y); ctx.stroke();
+
+        ctx.fillStyle = "#38a169";
+        ctx.beginPath(); ctx.arc(algoCenter.x, algoCenter.y, 6, 0, Math.PI*2); ctx.fill();
+        drawLabel(algoCenter.x, algoCenter.y, "对角线交点 (物理中心)", "#38a169", 25);
+
+        // Errors
+        let distBBox = Math.sqrt(Math.pow(bboxCenter.x - gtCenter.x, 2) + Math.pow(bboxCenter.y - gtCenter.y, 2));
+        let distAlgo = Math.sqrt(Math.pow(algoCenter.x - gtCenter.x, 2) + Math.pow(algoCenter.y - gtCenter.y, 2));
+
+        bboxErrorEl.textContent = distBBox.toFixed(2) + " px";
+        algoErrorEl.textContent = distAlgo.toFixed(2) + " px";
+    }
+
+    draw();
+</script>
+</body>
+</html>
