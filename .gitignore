@@ -41,3 +41,5 @@ f_*.txt
 # === 6. 临时文件和日志 ===
 *.csv
 *.log
+landmarkslam/implement/data/lines1.bag
+landmarkslam/implement/data/lines2.bag

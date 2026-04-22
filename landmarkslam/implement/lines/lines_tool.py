@@ -38,11 +38,11 @@ def detect_and_filter_lines_plslam(image_path, window_name):
     img = cv2.imread(image_path)
     if img is None:
         print(f"❌ 无法读取图像: {image_path}")
-        return
+        return [], [], (0, 0, 0, 0)
 
     pts_poly = select_four_points(img, f"Select 4 Points: {window_name}")
     x, y, w, h = cv2.boundingRect(pts_poly)
-    if w == 0 or h == 0: return
+    if w == 0 or h == 0: return [], [], (0, 0, 0, 0)
     img_roi = img[y:y+h, x:x+w]
     
     # ----------------------------------------
@@ -143,7 +143,7 @@ def detect_and_filter_lines_plslam(image_path, window_name):
     cv2.namedWindow(res_window, cv2.WINDOW_AUTOSIZE)
     cv2.imshow(res_window, result_img)
     
-    return final_horizontal,final_vertical
+    return final_horizontal, final_vertical, pts_poly
 
 # ==========================================
 if __name__ == "__main__":

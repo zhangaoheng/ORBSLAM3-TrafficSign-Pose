@@ -211,3 +211,52 @@ if __name__ == "__main__":
                 print(f"   旋转 R   :\n{np.round(R, 4)}")
                 print(f"   归一化 t :\n{np.round(t.flatten(), 4)}")
                 print("-" * 40)
+def match_images_with_auto_roi(img1_color, img2_color, pts1_roi, pts2_roi):
+    """
+    自动通过外部传入的物理边界（四角点）划定 ROI 进行 LoFTR 匹配，无需人工点击
+    """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"👉 正在使用设备: {device} 进行自动化共面 ROI 匹配")
+
+    img1_gray = cv2.cvtColor(img1_color, cv2.COLOR_BGR2GRAY)
+    img2_gray = cv2.cvtColor(img2_color, cv2.COLOR_BGR2GRAY)
+
+    mask1 = np.zeros_like(img1_gray)
+    cv2.fillPoly(mask1, [pts1_roi], 255)
+    mask2 = np.zeros_like(img2_gray)
+    cv2.fillPoly(mask2, [pts2_roi], 255)
+
+    img1_masked = cv2.bitwise_and(img1_gray, img1_gray, mask=mask1)
+    img2_masked = cv2.bitwise_and(img2_gray, img2_gray, mask=mask2)
+
+    img1_tensor = torch.from_numpy(img1_masked)[None, None].float() / 255.0
+    img2_tensor = torch.from_numpy(img2_masked)[None, None].float() / 255.0
+    img1_tensor = img1_tensor.to(device)
+    img2_tensor = img2_tensor.to(device)
+
+    print("⏳ 正在加载 LoFTR 模型进行自动局部精准匹配...")
+    matcher = LoFTR(pretrained='outdoor').to(device)
+    matcher.eval()
+
+    with torch.no_grad():
+        correspondences = matcher({"image0": img1_tensor, "image1": img2_tensor})
+        
+    mkpts1 = correspondences['keypoints0'].cpu().numpy()
+    mkpts2 = correspondences['keypoints1'].cpu().numpy()
+    confidence = correspondences['confidence'].cpu().numpy()
+    
+    print(f"🎯 LoFTR 在自动掩码区域提取到 {len(mkpts1)} 对共面匹配点。")
+
+    conf_thresh = 0.5
+    good_pts1, good_pts2 = [], []
+    
+    for p1, p2, conf in zip(mkpts1, mkpts2, confidence):
+        if conf > conf_thresh:
+            in_poly1 = cv2.pointPolygonTest(pts1_roi, (float(p1[0]), float(p1[1])), False) >= 0
+            in_poly2 = cv2.pointPolygonTest(pts2_roi, (float(p2[0]), float(p2[1])), False) >= 0
+            if in_poly1 and in_poly2:
+                good_pts1.append(p1)
+                good_pts2.append(p2)
+
+    print(f"🔪 经过置信度与严格自动 ROI 边界过滤，重构出 {len(good_pts1)} 对有效共面点！")
+    return np.array(good_pts1), np.array(good_pts2)

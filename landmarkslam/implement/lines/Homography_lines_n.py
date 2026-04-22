@@ -6,6 +6,10 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 # ==========================================
 # 导包：调用你的两个底层模块
 # ==========================================
+import sys
+import os
+# 【自动适配系统路径】为了支持其他目录 (如 main/) 跨文件夹导入，自动将当前文件目录加入环境
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from lines_tool import detect_and_filter_lines_plslam
 from Homography_loftr_tool import match_images_with_loftr_roi, visualize_matches_one_by_one
 
@@ -77,10 +81,10 @@ def evaluate_orthogonality(h_lines, v_lines, n, K):
 # ==========================================
 # 📊 3D 交互式可视化窗口
 # ==========================================
-def visualize_3d_scene(R, t, n):
+def visualize_3d_scene(R, t, n, K, roi):
     fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111, projection='3d')
-    ax.set_title("SLAM 3D Viewer: Relative Pose & Planar Target", fontsize=14)
+    ax.set_title("SLAM 3D Viewer: Relative Pose & True Planar Target", fontsize=14)
 
     # 1. 绘制相机 1 (作为世界原点)
     C1 = np.array([0.0, 0.0, 0.0])
@@ -102,28 +106,51 @@ def visualize_3d_scene(R, t, n):
 
     ax.plot([C1[0], C2[0]], [C1[1], C2[1]], [C1[2], C2[2]], color='gray', linestyle='--')
 
-    # 3. 计算并绘制路牌平面和法向量
-    plane_center = np.array([0, 0, 1.0 / n[2]])
-    ax.quiver(*plane_center, *n, color='magenta', length=0.3, linewidth=2, arrow_length_ratio=0.3)
-    ax.text(*plane_center, " Normal (n)", color='magenta', fontsize=12)
+    # 3. 基于你点击的4个物理形变角点，计算在三维空间中这块平面的真实轮廓
+    pts = np.array(roi, dtype="float32")
+    # 对4个角点进行几何排序: 左上(TL), 右上(TR), 右下(BR), 左下(BL)
+    rect = np.zeros((4, 2), dtype="float32")
+    s = pts.sum(axis=1)
+    rect[0] = pts[np.argmin(s)]     # 左上: x+y 最小
+    rect[2] = pts[np.argmax(s)]     # 右下: x+y 最大
+    diff = np.diff(pts, axis=1)     # y - x
+    rect[1] = pts[np.argmin(diff)]  # 右上: y-x 最小 (即x很大,y很小)
+    rect[3] = pts[np.argmax(diff)]  # 左下: y-x 最大 (即x很小,y很大)
 
-    u = np.array([1, 0, 0])
-    if np.abs(np.dot(u, n)) > 0.9: u = np.array([0, 1, 0])
-    u = u - np.dot(u, n) * n
-    u /= np.linalg.norm(u)
-    v = np.cross(n, u)
+    K_inv = np.linalg.inv(K)
 
-    s = 0.4 
-    p1 = plane_center + s * u + s * v
-    p2 = plane_center - s * u + s * v
-    p3 = plane_center - s * u - s * v
-    p4 = plane_center + s * u - s * v
-    poly = [[p1, p2, p3, p4]]
+    def get_3d_point(p_2d):
+        ray = K_inv @ np.array([p_2d[0], p_2d[1], 1.0])
+        s = 1.0 / np.dot(n, ray)
+        return s * ray
+
+    # 逆投影获取三维空间中物理纸张真实的 4 个顶点
+    P_TL = get_3d_point(rect[0])
+    P_TR = get_3d_point(rect[1])
+    P_BR = get_3d_point(rect[2])
+    P_BL = get_3d_point(rect[3])
+
+    plane_center = P_TL # 【核心】将左上角作为平面的正交原点
+    vec_x = P_TR - P_TL # X轴（物体的长）
+    vec_y = P_BL - P_TL # Y轴（物体的宽）
     
-    ax.add_collection3d(Poly3DCollection(poly, alpha=0.3, facecolor='cyan', edgecolor='k'))
+    # 确保 Z 轴正向总是朝向相机的！(抵消opencv归一化的翻转)
+    Z_axis = -n if n[2] > 0 else n 
+    
+    # 绘制目标的局部坐标系
+    ax_len = np.linalg.norm(vec_x) * 0.5 
+    ax.quiver(*plane_center, *vec_x, color='red', length=1.0, linewidth=2.5) # 长
+    ax.quiver(*plane_center, *vec_y, color='green', length=1.0, linewidth=2.5) # 宽
+    ax.quiver(*plane_center, *Z_axis, color='blue', length=ax_len, linewidth=2.5, arrow_length_ratio=0.3) # 垂向Z
+    
+    ax.text(*plane_center, " Origin (TL)", color='black')
+
+    # 将 4 个点连结成平面绘制
+    poly = [[P_TL, P_TR, P_BR, P_BL]]
+    ax.add_collection3d(Poly3DCollection(poly, alpha=0.4, facecolor='cyan', edgecolor='k'))
 
     # 4. 强制坐标轴比例 1:1:1
-    all_pts = np.array([C1, C2, plane_center, p1, p2, p3, p4])
+    all_pts = np.array([C1, C2, P_TL, P_TR, P_BL, P_BR])
     max_range = np.array([all_pts[:,0].max()-all_pts[:,0].min(), 
                           all_pts[:,1].max()-all_pts[:,1].min(), 
                           all_pts[:,2].max()-all_pts[:,2].min()]).max() / 2.0
@@ -134,6 +161,10 @@ def visualize_3d_scene(R, t, n):
     ax.set_xlim(mid_x - max_range, mid_x + max_range)
     ax.set_ylim(mid_y - max_range, mid_y + max_range)
     ax.set_zlim(mid_z - max_range, mid_z + max_range)
+
+    # （重要）翻转 Y/Z 轴应对相机投影，使它视觉自然！
+    ax.invert_yaxis()
+    ax.invert_zaxis()
 
     ax.set_xlabel('X')
     ax.set_ylabel('Y')
@@ -159,7 +190,7 @@ if __name__ == "__main__":
     print("\n" + "="*40)
     print(" 🛠️ 阶段 1：提取汉字骨架 (提供正交先验数据)")
     print("="*40)
-    h_lines, v_lines = detect_and_filter_lines_plslam(IMG1_PATH, "Image 1: Select Lines ROI")
+    h_lines, v_lines, roi_target = detect_and_filter_lines_plslam(IMG1_PATH, "Image 1: Select Lines ROI")
     
     if len(h_lines) < 2 or len(v_lines) < 2:
         exit("❌ 有效线段太少，无法进行正交验证，程序终止。")
@@ -211,8 +242,8 @@ if __name__ == "__main__":
         print(f"🌀 绝对旋转矩阵 R :\n{np.round(best_R, 4)}")
         print("🏆"*20 + "\n")
 
-        # 🌟 弹出 3D 窗口
-        visualize_3d_scene(best_R, best_t, best_n)
+        # 🌟 弹出 3D 窗口 (传入框选信息和内参用于还原长宽)
+        visualize_3d_scene(best_R, best_t, best_n, K, roi_target)
         
     else:
         print("⚠️ 所有的解都不符合物理规律！")

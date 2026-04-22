@@ -8,17 +8,20 @@
 IMPLEMENT_DIR="/home/zah/ORB_SLAM3-master/landmarkslam/implement"
 BUILD_DIR="$IMPLEMENT_DIR/build"
 
+# 1.1 定义你要处理的数据集前缀 (便于你随便切换 lines1 还是 lines2)
+DATA_SEQ="lines1"
+
 # 【⭐ 新增】定义你想保存结果的专属文件夹路径
 # 你可以随意修改这个路径，比如放到 data 文件夹下
-OUTPUT_DIR="/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/slam_frames"
+OUTPUT_DIR="/home/zah/ORB_SLAM3-master/landmarkslam/implement/output"
 
 # 2. 定义运行参数路径 (全部使用绝对路径，拒绝任何路径歧义)
 VOCAB_PATH="/home/zah/ORB_SLAM3-master/Vocabulary/ORBvoc.txt"
 CONFIG_PATH="/home/zah/ORB_SLAM3-master/landmarkslam/D456.yaml"
-CAM0_PATH="/home/zah/ORB_SLAM3-master/landmarkslam/data/stereo_imu_dataset/cam0"
-TIMES_PATH="/home/zah/ORB_SLAM3-master/landmarkslam/data/stereo_imu_dataset/times.txt"
-IMU_PATH="/home/zah/ORB_SLAM3-master/landmarkslam/data/stereo_imu_dataset/imu.txt"
-OUTPUT_PREFIX="my_mid_test"
+CAM0_PATH="/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/$DATA_SEQ/cam0/data"
+TIMES_PATH="/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/$DATA_SEQ/times.txt"
+IMU_PATH="/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/$DATA_SEQ/imu0/data.csv"
+OUTPUT_PREFIX="lines1_slam_traj"
 
 echo "=========================================="
 echo ">>> [1/3] 进入编译环境并检查更新..."

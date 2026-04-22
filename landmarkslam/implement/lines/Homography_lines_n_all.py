@@ -148,7 +148,7 @@ if __name__ == "__main__":
     print("\n" + "="*40)
     print(" 🛠️ 阶段 1：提取汉字骨架 (提供正交先验数据)")
     print("="*40)
-    h_lines, v_lines = detect_and_filter_lines_plslam(IMG1_PATH, "Image 1: Select Lines ROI")
+    h_lines, v_lines, _ = detect_and_filter_lines_plslam(IMG1_PATH, "Image 1: Select Lines ROI")
     
     if len(h_lines) < 2 or len(v_lines) < 2:
         exit("❌ 有效线段太少，无法进行正交验证，程序终止。")
