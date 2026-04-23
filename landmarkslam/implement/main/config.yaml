@@ -1,0 +1,26 @@
+# ==========================================
+# 物理度量恢复引擎配置文件
+# ==========================================
+
+# 1. 相机内参 (以 D456 为例)
+Camera:
+  fx: 429.78045654
+  fy: 429.78045654
+  cx: 429.94277954
+  cy: 241.57313537
+
+# 2. 算法全局超参数
+Algorithm:
+  frame_step: 15  # Looming 跨帧步长 (拉大基线，建议 5 到 15)
+  cache_file: "selected_frames_cache.txt"  # GUI 选帧缓存文件名
+
+# 3. 序列 1 配置 (提供基准、Looming 连续测距、提取汉字骨架)
+Sequence1:
+  image_dir: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/lines2/cam0/data"
+  trajectory_path: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/output/all_frames_lines2_slam_traj.txt"
+  roi_path: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/lines2/cam0/data/saved_rois.txt"
+
+# 4. 序列 2 配置 (目标序列，只截取一帧用于匹配)
+Sequence2:
+  image_dir: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/lines1/cam0/data"
+  trajectory_path: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/output/all_frames_lines1_slam_traj.txt"

@@ -6,6 +6,7 @@ import glob
 import math
 import matplotlib.pyplot as plt
 import torch
+import yaml  # 🌟 新增：用于读取配置文件
 from kornia.feature import LoFTR
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from scipy.spatial.transform import Rotation as R_scipy
@@ -20,22 +21,34 @@ if BASE_DIR not in sys.path:
 from tools.mid import extract_four_lines_from_real_image, calculate_rectangle_center
 from mid_FOE_Z_d.pure_looming_depth import (
     load_tum_trajectory, get_closest_pose, 
-    calculate_relative_motion, calculate_pure_looming_Z, load_saved_rois, FRAME_STEP, fx, fy, cx, cy
+    calculate_relative_motion, calculate_pure_looming_Z, load_saved_rois, fx, fy, cx, cy
 )
 from mid_FOE_Z_d.imgs_mid import process_sequence_with_cached_rois
 
 # ==============================================================================
-# 🌟 全局参数与相机内参 (D456)
+# 🌟 全局加载 YAML 配置文件
 # ==============================================================================
-fx, fy = 429.78045654, 429.78045654
-cx, cy = 429.94277954, 241.57313537
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
+if not os.path.exists(CONFIG_PATH):
+    print(f"❌ 找不到配置文件: {CONFIG_PATH}，请确保它与此脚本在同一目录下！")
+    sys.exit(1)
+
+with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+    config = yaml.safe_load(f)
+
+# ==== 读取相机内参 ====
+fx = config['Camera']['fx']
+fy = config['Camera']['fy']
+cx = config['Camera']['cx']
+cy = config['Camera']['cy']
 
 K = np.array([[fx,  0, cx],
               [ 0, fy, cy],
               [ 0,  0,  1]], dtype=np.float64)
 K_inv = np.linalg.inv(K)
 
-FRAME_STEP = 15  # 跨帧步长 (拉大基线，建议 5 到 15)
+# ==== 读取算法超参数 ====
+FRAME_STEP = config['Algorithm']['frame_step']
 
 # ==============================================================================
 # 🌟 模块 1：Looming 核心数学与去旋
@@ -125,7 +138,6 @@ def detect_and_filter_lines_plslam(image_path, window_name):
     img = cv2.imread(image_path)
     if img is None: return [], [], (0, 0, 0, 0)
 
-    # 这里的 4 个点只用来框选汉字区域 ROI
     pts_poly = select_four_points(img, f"Select 4 Points: {window_name}")
     x, y, w, h = cv2.boundingRect(pts_poly)
     if w == 0 or h == 0: return [], [], (0, 0, 0, 0)
@@ -192,9 +204,7 @@ def detect_and_filter_lines_plslam(image_path, window_name):
     return final_horizontal, final_vertical, pts_poly
 
 def match_images_with_loftr_roi(img1_color, img2_color):
-    """
-    使用点击的 4 个点生成硬掩码，在此掩码范围内运行 LoFTR 特征匹配
-    """
+    """使用点击的 4 个点生成硬掩码，在此掩码范围内运行 LoFTR"""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"👉 正在使用设备: {device} 运行 LoFTR")
 
@@ -381,30 +391,32 @@ def visualize_3d_scene(R, t, n, K, roi):
     plt.show()
 
 # ==============================================================================
-# 🚀 最终主流水线引擎：严格融合，绝对保留所有功能！
+# 🚀 最终主流水线引擎
 # ==============================================================================
 def integrate_and_solve_metric_pose():
-    # ==== 路径配置 ====
-    FOLDER_PATH_1 = "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/lines2/cam0/data"
-    TRAJ_PATH_1 = "/home/zah/ORB_SLAM3-master/landmarkslam/implement/output/all_frames_lines2_slam_traj.txt"
-    ROI_PATH_1 = os.path.join(FOLDER_PATH_1, "saved_rois.txt")
+    # ==== 从 YAML 文件加载配置 ====
+    # 将 cache_file 也放入 YAML 读取以保证纯粹的结构分离
+    cache_file = config['Algorithm']['cache_file']
+    if not os.path.isabs(cache_file):
+        cache_file = os.path.join(os.path.dirname(__file__), cache_file)
 
-    FOLDER_PATH_2 = "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/lines1/cam0/data"
-    TRAJ_PATH_2 = "/home/zah/ORB_SLAM3-master/landmarkslam/implement/output/all_frames_lines1_slam_traj.txt"
+    FOLDER_PATH_1 = config['Sequence1']['image_dir']
+    TRAJ_PATH_1 = config['Sequence1']['trajectory_path']
+    ROI_PATH_1 = config['Sequence1']['roi_path']
 
-    # ==== 加载数据 ====
+    FOLDER_PATH_2 = config['Sequence2']['image_dir']
+    TRAJ_PATH_2 = config['Sequence2']['trajectory_path']
+
     images1 = sorted(glob.glob(os.path.join(FOLDER_PATH_1, "*.png")))
     images2 = sorted(glob.glob(os.path.join(FOLDER_PATH_2, "*.png")))
     
-    # 注意：这里的 slam_poses1 是从 TUM 格式轨迹文件中加载的绝对位姿列表，包含时间戳、平移和四元数
     slam_poses1 = load_tum_trajectory(TRAJ_PATH_1)
 
-    print(f">>> 物理度量恢复")
-    print(f">>> (GUI选帧 -> Looming去旋测距 -> 提取汉字骨架 -> LoFTR特征匹配算H -> 正交筛选 -> 绝对平移)")
+    print(f">>> 🚀 启动 [物理度量恢复] 跨序列双剑合璧！")
+    print(f">>> 逻辑树：GUI选帧 -> Looming去旋测距 -> 画框提取汉字骨架 -> LoFTR特征匹配算H -> 正交筛选 -> 绝对平移")
     
     # ==== 1. GUI 手动挑选计算帧 ====
     idx1_base, idx2_base = 0, 0 
-    cache_file = os.path.join(os.path.dirname(__file__), "selected_frames_cache.txt")
     if os.path.exists(cache_file):
         with open(cache_file, "r") as f:
             lines = f.read().strip().split()
@@ -426,11 +438,9 @@ def integrate_and_solve_metric_pose():
     if idx1_next >= len(images1) or idx1_next >= len(saved_rois1) or idx1_base >= len(saved_rois1):
         exit("❌ Lines1 序列后续帧不足以计算 Looming，请调整 FRAME_STEP 或选取靠前的帧。")
 
-    # 从 SLAM 轨迹中找到与选帧时间戳最接近的位姿
     time1_A = float(os.path.basename(images1[idx1_base]).replace(".png", "")) / 1e9
     time1_B = float(os.path.basename(images1[idx1_next]).replace(".png", "")) / 1e9
 
-    
     pose1_A = get_closest_pose(time1_A, slam_poses1)
     pose1_B = get_closest_pose(time1_B, slam_poses1)
 
@@ -514,11 +524,11 @@ def integrate_and_solve_metric_pose():
     p_2d = np.array([center1_A_looming[0], center1_A_looming[1], 1.0]).reshape(3, 1)
     ray = K_inv @ p_2d
     
-    # 通过 Looming 深度将这个射线投影到 3D 空间中，得到一个 3D 点 X_3d，这个点应该在纸张平面上
+    # 通过 Looming 深度将这个射线投影到 3D 空间中，得到一个 3D 点 X_3d
     X_3d = ray * (Z_looming / ray[2][0])
-    # 计算这个 3D 点到平面的距离 d，理论上应该等于 Looming 测得的 Z_looming
+    # 计算这个 3D 点到平面的距离 d
     d = float((best_n.T @ X_3d)[0])
-    # 通过这个距离 d 和数学解的 t 的方向关系，来还原出跨序列的绝对平移 t_real
+    # 通过距离 d 还原出跨序列的绝对平移 t_real
     t_real = best_t * abs(d)
 
     print("\n🏆 (两极反转) 双序列跨界绝对姿态提取结果！")
