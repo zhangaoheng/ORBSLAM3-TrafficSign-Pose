@@ -16,11 +16,11 @@ Algorithm:
 
 # 3. 序列 1 配置 (提供基准、Looming 连续测距、提取汉字骨架)
 Sequence1:
-  image_dir: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/lines2/cam0/data"
-  trajectory_path: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/output/all_frames_lines2_slam_traj.txt"
-  roi_path: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/lines2/cam0/data/saved_rois.txt"
+  image_dir: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/lines1/cam0/data"
+  trajectory_path: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/output/all_frames_lines1_slam_traj.txt"
+  roi_path: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/lines1/cam0/data/saved_rois.txt"
 
 # 4. 序列 2 配置 (目标序列，只截取一帧用于匹配)
 Sequence2:
-  image_dir: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/lines1/cam0/data"
-  trajectory_path: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/output/all_frames_lines1_slam_traj.txt"
+  image_dir: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/lines2/cam0/data"
+  trajectory_path: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/output/all_frames_lines2_slam_traj.txt"

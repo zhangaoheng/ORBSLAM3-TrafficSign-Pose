@@ -6,7 +6,8 @@ import glob
 import math
 import matplotlib.pyplot as plt
 import torch
-import yaml  # 🌟 新增：用于读取配置文件
+import yaml
+import datetime  # 🌟 新增：用于实验时间戳
 from kornia.feature import LoFTR
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from scipy.spatial.transform import Rotation as R_scipy
@@ -26,11 +27,23 @@ from mid_FOE_Z_d.pure_looming_depth import (
 from mid_FOE_Z_d.imgs_mid import process_sequence_with_cached_rois
 
 # ==============================================================================
+# 🌟 全局日志记录器 (将所有输出同步保存到 txt 文件)
+# ==============================================================================
+LOG_FILE_PATH = os.path.join(os.path.dirname(__file__), "experiment_results.txt")
+
+def log_print(*args, **kwargs):
+    """自定义打印函数：同时输出到终端并追加保存到文件"""
+    msg = " ".join(map(str, args))
+    print(msg, **kwargs)
+    with open(LOG_FILE_PATH, "a", encoding="utf-8") as f:
+        f.write(msg + "\n")
+
+# ==============================================================================
 # 🌟 全局加载 YAML 配置文件
 # ==============================================================================
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 if not os.path.exists(CONFIG_PATH):
-    print(f"❌ 找不到配置文件: {CONFIG_PATH}，请确保它与此脚本在同一目录下！")
+    log_print(f"❌ 找不到配置文件: {CONFIG_PATH}，请确保它与此脚本在同一目录下！")
     sys.exit(1)
 
 with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
@@ -54,7 +67,6 @@ FRAME_STEP = config['Algorithm']['frame_step']
 # 🌟 模块 1：Looming 核心数学与去旋
 # ==============================================================================
 def derotate_point(P_raw, R_12):
-    """使用纯旋转单应性矩阵 H 消除相机颠簸"""
     H = K @ R_12 @ K_inv
     P_homo = np.array([P_raw[0], P_raw[1], 1.0])
     P_pure_homo = H @ P_homo
@@ -63,10 +75,10 @@ def derotate_point(P_raw, R_12):
     return (u_pure, v_pure)
 
 def calculate_pure_looming_Z_v2(P1, P2_pure, FOE, delta_d):
-    """纯平移宇宙下的 Looming 绝杀公式"""
     r1 = math.sqrt((P1[0] - FOE[0])**2 + (P1[1] - FOE[1])**2)
     r2 = math.sqrt((P2_pure[0] - FOE[0])**2 + (P2_pure[1] - FOE[1])**2)
-    dr = r2 - r1
+    # 修复：膨胀量应该是当前帧距FOE距离减去前一帧距FOE距离（相机向前，目标像膨胀）
+    dr = r1 - r2   # 原为 dr = r2 - r1，导致 dr 为负而失败
     if dr <= 0.2: 
         return None, r1, r2, dr
     Z = (r1 * delta_d) / dr
@@ -103,10 +115,9 @@ def select_frame_gui(images, default_idx, sequence_name):
     return idx
 
 def select_four_points(img, window_name):
-    """防抖版 4点选区：划定目标 ROI 掩码边界"""
     points = []
     display_img = img.copy()
-    print(f"\n👉 请在 '{window_name}' 中顺时针或逆时针点击区域外围的 4 个点。")
+    log_print(f"\n👉 请在 '{window_name}' 中顺时针或逆时针点击区域外围的 4 个点。")
 
     def mouse_callback(event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:
@@ -132,7 +143,7 @@ def select_four_points(img, window_name):
     return np.array(points, dtype=np.int32)
 
 # ==============================================================================
-# 🌟 模块 3：汉字特征提取、LoFTR 匹配及检验 (一字不删)
+# 🌟 模块 3：汉字特征提取、LoFTR 匹配及检验
 # ==============================================================================
 def detect_and_filter_lines_plslam(image_path, window_name):
     img = cv2.imread(image_path)
@@ -204,9 +215,8 @@ def detect_and_filter_lines_plslam(image_path, window_name):
     return final_horizontal, final_vertical, pts_poly
 
 def match_images_with_loftr_roi(img1_color, img2_color):
-    """使用点击的 4 个点生成硬掩码，在此掩码范围内运行 LoFTR"""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"👉 正在使用设备: {device} 运行 LoFTR")
+    log_print(f"👉 正在使用设备: {device} 运行 LoFTR")
 
     pts1_roi = select_four_points(img1_color, "Image 1: Select ROI for LoFTR")
     pts2_roi = select_four_points(img2_color, "Image 2: Select ROI for LoFTR")
@@ -226,7 +236,7 @@ def match_images_with_loftr_roi(img1_color, img2_color):
     img1_tensor = img1_tensor.to(device)
     img2_tensor = img2_tensor.to(device)
 
-    print("⏳ 正在加载 LoFTR 模型进行局部精准匹配...")
+    log_print("⏳ 正在加载 LoFTR 模型进行局部精准匹配...")
     matcher = LoFTR(pretrained='outdoor').to(device)
     matcher.eval()
 
@@ -248,7 +258,7 @@ def match_images_with_loftr_roi(img1_color, img2_color):
                 good_pts1.append(p1)
                 good_pts2.append(p2)
 
-    print(f"🔪 经过严格 ROI 过滤，获得 {len(good_pts1)} 对纯净特征匹配点！")
+    log_print(f"🔪 经过严格 ROI 过滤，获得 {len(good_pts1)} 对纯净特征匹配点！")
     return np.array(good_pts1), np.array(good_pts2)
 
 def visualize_matches_one_by_one(img1_color, img2_color, pts1, pts2, mask):
@@ -258,7 +268,7 @@ def visualize_matches_one_by_one(img1_color, img2_color, pts1, pts2, mask):
     valid_indices = [i for i, is_inlier in enumerate(mask.ravel()) if is_inlier]
     if not valid_indices: return
 
-    print("\n🔬 开启显微镜模式：准备逐个审查匹配点！按 D 下一个，A 上一个，Q 退出。")
+    log_print("\n🔬 开启显微镜模式：准备逐个审查匹配点！按 D 下一个，A 上一个，Q 退出。")
     current_idx = 0
     window_name = "Microscope Mode: Inspect Matches (Press Q to exit)"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
@@ -352,7 +362,7 @@ def visualize_dashboard(img1, img2, R_rel, t_real, X_3d, n_cv):
     plt.tight_layout()
     plt.show()
 
-def visualize_3d_scene(R, t, n, K, roi):
+def visualize_3d_scene(R, t, n, d, K, roi):
     fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111, projection='3d')
     ax.set_title("SLAM 3D Viewer: Relative Pose & True Planar Target", fontsize=14)
@@ -372,7 +382,7 @@ def visualize_3d_scene(R, t, n, K, roi):
     
     def get_3d_point(p_2d):
         ray = K_inv @ np.array([p_2d[0], p_2d[1], 1.0])
-        return (1.0 / np.dot(n, ray)) * ray
+        return (d / np.dot(n, ray)) * ray
         
     P_TL, P_TR, P_BR, P_BL = get_3d_point(rect[0]), get_3d_point(rect[1]), get_3d_point(rect[2]), get_3d_point(rect[3])
     plane_center, vec_x, vec_y = P_TL, P_TR - P_TL, P_BL - P_TL
@@ -394,8 +404,12 @@ def visualize_3d_scene(R, t, n, K, roi):
 # 🚀 最终主流水线引擎
 # ==============================================================================
 def integrate_and_solve_metric_pose():
+    # 🌟 写入实验时间戳边界
+    log_print("\n\n" + "="*80)
+    log_print(f"🚀 [EXPERIMENT START] Time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    log_print("="*80)
+
     # ==== 从 YAML 文件加载配置 ====
-    # 将 cache_file 也放入 YAML 读取以保证纯粹的结构分离
     cache_file = config['Algorithm']['cache_file']
     if not os.path.isabs(cache_file):
         cache_file = os.path.join(os.path.dirname(__file__), cache_file)
@@ -412,8 +426,8 @@ def integrate_and_solve_metric_pose():
     
     slam_poses1 = load_tum_trajectory(TRAJ_PATH_1)
 
-    print(f">>> 🚀 启动 [物理度量恢复] 跨序列双剑合璧！")
-    print(f">>> 逻辑树：GUI选帧 -> Looming去旋测距 -> 画框提取汉字骨架 -> LoFTR特征匹配算H -> 正交筛选 -> 绝对平移")
+    log_print(f">>> 🚀 启动 [物理度量恢复] 跨序列双剑合璧！")
+    log_print(f">>> 逻辑树：GUI选帧 -> Looming去旋测距 -> 画框提取汉字骨架 -> LoFTR特征匹配算H -> 正交筛选 -> 绝对平移")
     
     # ==== 1. GUI 手动挑选计算帧 ====
     idx1_base, idx2_base = 0, 0 
@@ -422,24 +436,27 @@ def integrate_and_solve_metric_pose():
             lines = f.read().strip().split()
             if len(lines) >= 2:
                 idx1_base, idx2_base = int(lines[0]), int(lines[1])
-        print(f"\n📁 发现缓存文件，自动加载选帧：Lines1[{idx1_base}] <---> Lines2[{idx2_base}]")
+        log_print(f"\n📁 发现缓存文件，自动加载选帧：Lines1[{idx1_base}] <---> Lines2[{idx2_base}]")
     else:
-        print("\n🔔 [GUI 选帧] 请在窗口中操作...")
+        log_print("\n🔔 [GUI 选帧] 请在窗口中操作...")
         idx1_base = select_frame_gui(images1, idx1_base, "Sequence 1 (Lines1)")
         idx2_base = select_frame_gui(images2, idx2_base, "Sequence 2 (Lines2)")
         with open(cache_file, "w") as f: f.write(f"{idx1_base}\n{idx2_base}")
+        log_print(f"👉 最终选定计算帧：Lines1_img[{idx1_base}] <---> Lines2_img[{idx2_base}]")
 
     # ==== 2. 高精度去旋 Looming 测距 ====
-    print("\n👉 检验序列 1 (基准) 的连续测距掩码框...")
+    log_print("\n👉 检验序列 1 (基准) 的连续测距掩码框...")
+    # 注意：这里直接打印，因为 process_sequence 内部没改
     process_sequence_with_cached_rois(FOLDER_PATH_1)
     saved_rois1 = load_saved_rois(ROI_PATH_1)
 
-    idx1_next = idx1_base + FRAME_STEP
-    if idx1_next >= len(images1) or idx1_next >= len(saved_rois1) or idx1_base >= len(saved_rois1):
-        exit("❌ Lines1 序列后续帧不足以计算 Looming，请调整 FRAME_STEP 或选取靠前的帧。")
+    idx1_prev = idx1_base - FRAME_STEP
+    if idx1_prev < 0 or idx1_base >= len(saved_rois1):
+        log_print("❌ Lines1 序列前序帧不足以计算 Looming，请调整 FRAME_STEP 或选取靠后的帧。")
+        sys.exit(1)
 
-    time1_A = float(os.path.basename(images1[idx1_base]).replace(".png", "")) / 1e9
-    time1_B = float(os.path.basename(images1[idx1_next]).replace(".png", "")) / 1e9
+    time1_A = float(os.path.basename(images1[idx1_prev]).replace(".png", "")) / 1e9
+    time1_B = float(os.path.basename(images1[idx1_base]).replace(".png", "")) / 1e9
 
     pose1_A = get_closest_pose(time1_A, slam_poses1)
     pose1_B = get_closest_pose(time1_B, slam_poses1)
@@ -447,60 +464,75 @@ def integrate_and_solve_metric_pose():
     R_12, t_12 = calculate_motion_rt(pose1_A, pose1_B)
     tx, ty, tz = t_12
     delta_d = tz
-    if delta_d < 0.01: exit(f"⚠️ 序列 1 运动太小 (delta_d={delta_d:.4f})，无法计算 Looming Z！")
+    log_print(f"    [Motion Info] tx: {tx:.4f}, ty: {ty:.4f}, tz(delta_d): {tz:.4f}")
+    if delta_d < 0.01: 
+        log_print(f"⚠️ 序列 1 运动太小 (delta_d={delta_d:.4f})，无法计算 Looming Z！")
+        sys.exit(1)
 
     FOE = (fx * (tx / tz) + cx, fy * (ty / tz) + cy)
-    img1_A = cv2.imread(images1[idx1_base])
-    img1_B = cv2.imread(images1[idx1_next])
+    img1_A = cv2.imread(images1[idx1_prev])
+    img1_B = cv2.imread(images1[idx1_base])
     
-    lines1_A = extract_four_lines_from_real_image(img1_A, saved_rois1[idx1_base])
-    lines1_B = extract_four_lines_from_real_image(img1_B, saved_rois1[idx1_next])
-    if not lines1_A or not lines1_B: exit("❌ 序列 1 提取 ROI 框失败")
+    lines1_A = extract_four_lines_from_real_image(img1_A, saved_rois1[idx1_prev])
+    lines1_B = extract_four_lines_from_real_image(img1_B, saved_rois1[idx1_base])
+    if not lines1_A or not lines1_B: 
+        log_print("❌ 序列 1 提取 ROI 框失败")
+        sys.exit(1)
 
-    center1_A_looming, _ = calculate_rectangle_center(*lines1_A)
-    center1_B_raw, _ = calculate_rectangle_center(*lines1_B)
+    center1_B_looming, _ = calculate_rectangle_center(*lines1_B)
+    center1_A_raw, _ = calculate_rectangle_center(*lines1_A)
 
     # 去旋洗掉颠簸
-    center1_B_pure = derotate_point(center1_B_raw, R_12)
-    # 计算 Looming 深度
-    Z_looming, _, _, dr = calculate_pure_looming_Z_v2(center1_A_looming, center1_B_pure, FOE, delta_d)
-    if Z_looming is None: exit("❌ 序列 1 Looming 计算失败")
-    print(f"[Lines1 内部] ✅ (被动测距模块) FOE 物理深度计算成功: Z = {Z_looming:.3f} m")
+    center1_A_pure = derotate_point(center1_A_raw, R_12)
+    
+    Z_looming, r1, r2, dr = calculate_pure_looming_Z_v2(center1_B_looming, center1_A_pure, FOE, delta_d)
+    if Z_looming is None: 
+        log_print(f"❌ 序列 1 Looming 计算失败 (膨胀量 dr 太小或为负数)")
+        sys.exit(1)
+    
+    log_print(f"[Lines1 内部] ✅ (被动测距模块) FOE 物理深度计算成功: Z = {Z_looming:.3f} m (dr = {dr:.2f}px)")
 
     # ==== 3. 提取汉字骨架 (包含1次 4点选区弹窗) ====
-    print("\n" + "="*40)
-    print(" 🛠️ 阶段 1：提取汉字骨架 (提供正交先验数据)")
-    print("="*40)
-    # 将会弹出窗口，让你点 4 个点生成汉字区域的 ROI 掩码
+    log_print("\n" + "="*40)
+    log_print(" 🛠️ 阶段 1：提取汉字骨架 (提供正交先验数据)")
+    log_print("="*40)
     h_lines, v_lines, roi_target = detect_and_filter_lines_plslam(images1[idx1_base], "Image 1: Select Lines ROI")
     
-    if len(h_lines) < 2 or len(v_lines) < 2: exit("❌ 有效线段太少，无法进行正交验证，程序终止。")
-    print(f"✅ 成功提取汉字骨架：横向 {len(h_lines)} 条，竖向 {len(v_lines)} 条。")
+    if len(h_lines) < 2 or len(v_lines) < 2: 
+        log_print("❌ 有效线段太少，无法进行正交验证，程序终止。")
+        sys.exit(1)
+    log_print(f"✅ 成功提取汉字骨架：横向 {len(h_lines)} 条，竖向 {len(v_lines)} 条。")
 
     # ==== 4. 启动 LoFTR 匹配引擎 (包含2次 4点选区弹窗) ====
-    print("\n" + "="*40)
-    print(" 🛠️ 阶段 2：启动 LoFTR 引擎解算数学位姿")
-    print("="*40)
+    log_print("\n" + "="*40)
+    log_print(" 🛠️ 阶段 2：启动 LoFTR 引擎解算数学位姿")
+    log_print("="*40)
     img2_base = cv2.imread(images2[idx2_base])
     
-    # 将会弹出 2 次窗口，让你分别在两张图上点 4 个点生成 LoFTR 匹配范围的掩码
     pts1, pts2 = match_images_with_loftr_roi(img1_A, img2_base)
     
     if pts1 is None or len(pts1) < 4:
-        exit("❌ LoFTR 有效匹配点不足，程序终止。")
+        log_print("❌ LoFTR 有效匹配点不足，程序终止。")
+        sys.exit(1)
 
-    print(f"\n👉 正在基于 LoFTR 特征点计算单应性矩阵 H ...")
+    log_print(f"\n👉 正在基于 LoFTR 特征点计算单应性矩阵 H ...")
     H, mask = cv2.findHomography(pts1, pts2, cv2.RANSAC, 3.0)
-    if H is None: exit("❌ 单应性矩阵 H 计算失败！")
+    if H is None: 
+        log_print("❌ 单应性矩阵 H 计算失败！")
+        sys.exit(1)
+
+    log_print("--- 高精度单应性矩阵 H ---")
+    log_print(np.round(H, 4))
 
     visualize_matches_one_by_one(img1_A, img2_base, pts1, pts2, mask)
 
     # ==== 5. 正交验证与姿态筛选 ====
     num_solutions, rotations, translations, normals = cv2.decomposeHomographyMat(H, K)
-    
-    print("\n" + "="*40)
-    print(" 🕵️‍♂️ 阶段 3：真理验算 (3D 正交性误差比对)")
-    print("="*40)
+    log_print(f"\n✅ 成功分解出 {num_solutions} 组位姿解。")
+
+    log_print("\n" + "="*40)
+    log_print(" 🕵️‍♂️ 阶段 3：真理验算 (3D 正交性误差比对)")
+    log_print("="*40)
 
     best_idx, min_error = -1, float('inf')
 
@@ -508,42 +540,42 @@ def integrate_and_solve_metric_pose():
         n_cv = normals[i].flatten()
         if n_cv[2] > 0: 
             error = evaluate_orthogonality(h_lines, v_lines, n_cv, K)
-            print(f"🟢 [候选解 {i+1}] 3D正交误差: {error:.4f}  |  数学解 n_cv: {np.round(n_cv, 4)}")
+            log_print(f"🟢 [候选解 {i+1}] 3D正交误差: {error:.4f}  |  数学解 n_cv: {np.round(n_cv, 4)}")
             if error < min_error:
                 min_error = error; best_idx = i
 
-    if best_idx == -1: exit("❌ 所有的解都不符合物理规律！")
+    if best_idx == -1: 
+        log_print("❌ 所有的解都不符合物理规律！")
+        sys.exit(1)
 
     best_R = rotations[best_idx]
     best_t = translations[best_idx]
     best_n = normals[best_idx].flatten()
-    print(f"🎉 验算完毕！【解 {best_idx+1}】完美通过汉字 3D 正交检验，是唯一真实姿态！")
+    log_print(f"🎉 验算完毕！【解 {best_idx+1}】完美通过汉字 3D 正交检验，是唯一真实姿态！")
 
     # ==== 6. 还原绝对平移与可视化 ====
-    # 将第一步 Looming 的中心点用来投影打出射线算距离
-    p_2d = np.array([center1_A_looming[0], center1_A_looming[1], 1.0]).reshape(3, 1)
+    p_2d = np.array([center1_B_looming[0], center1_B_looming[1], 1.0]).reshape(3, 1)
     ray = K_inv @ p_2d
     
-    # 通过 Looming 深度将这个射线投影到 3D 空间中，得到一个 3D 点 X_3d
     X_3d = ray * (Z_looming / ray[2][0])
-    # 计算这个 3D 点到平面的距离 d
     d = float((best_n.T @ X_3d)[0])
-    # 通过距离 d 还原出跨序列的绝对平移 t_real
     t_real = best_t * abs(d)
 
-    print("\n🏆 (两极反转) 双序列跨界绝对姿态提取结果！")
-    print("="*40)
-    print(f" -> 当下帧专属深度 Z_Looming: {Z_looming:.3f} m")
-    print(f" -> 摄像机到平面绝对垂直距离 d: {abs(d):.3f} m")
-    print(f" -> 跨序列真实的绝对平移 t_real (m):\n{t_real}")
-    print(f" -> 跨序列的绝对旋转矩阵 R :\n{np.round(best_R, 4)}")
-    print("="*40)
+    log_print("\n🏆 (两极反转) 双序列跨界绝对姿态提取结果！")
+    log_print("="*40)
+    log_print(f" -> 当下帧专属深度 Z_Looming: {Z_looming:.3f} m")
+    log_print(f" -> 摄像机到平面绝对垂直距离 d: {abs(d):.3f} m")
+    log_print(f" -> 跨序列真实的绝对平移 t_real (m):\n{t_real}")
+    log_print(f" -> 跨序列的绝对旋转矩阵 R :\n{np.round(best_R, 4)}")
+    log_print("="*40)
 
-    print("\n🎨 正在启动 3D 姿态与图像联合可视化窗口 (可拖拽旋转)...")
+    log_print("\n🎨 正在启动 3D 姿态与图像联合可视化窗口 (可拖拽旋转)...")
     visualize_dashboard(img1_A, img2_base, best_R, t_real, X_3d, best_n)
     
-    print("\n🎨 正在启动带有真实纸张物理形变的 3D 窗口...")
-    visualize_3d_scene(best_R, t_real, best_n, K, roi_target)
+    log_print("\n🎨 正在启动带有真实纸张物理形变的 3D 窗口...")
+    visualize_3d_scene(best_R, t_real, best_n, d, K, roi_target)
+    
+    log_print(f"✅ [EXPERIMENT COMPLETE] Results saved to {LOG_FILE_PATH}")
 
 if __name__ == "__main__":
     integrate_and_solve_metric_pose()
