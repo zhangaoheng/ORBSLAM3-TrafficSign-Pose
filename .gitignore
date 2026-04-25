@@ -43,3 +43,7 @@ f_*.txt
 *.log
 landmarkslam/implement/data/lines1.bag
 landmarkslam/implement/data/lines2.bag
+landmarkslam/implement/data/deepseek/20260425_151917.bag
+landmarkslam/implement/data/deepseek/20260425_151937.bag
+landmarkslam/implement/data/deepseek/lines1/camera_intrinsics.json
+landmarkslam/implement/data/deepseek/lines2/camera_intrinsics.json

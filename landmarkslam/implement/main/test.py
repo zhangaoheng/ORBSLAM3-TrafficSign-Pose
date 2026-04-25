@@ -78,7 +78,7 @@ def calculate_pure_looming_Z_v2(P1, P2_pure, FOE, delta_d):
     r1 = math.sqrt((P1[0] - FOE[0])**2 + (P1[1] - FOE[1])**2)
     r2 = math.sqrt((P2_pure[0] - FOE[0])**2 + (P2_pure[1] - FOE[1])**2)
     # 修复：膨胀量应该是当前帧距FOE距离减去前一帧距FOE距离（相机向前，目标像膨胀）
-    dr = r1 - r2   # 原为 dr = r2 - r1，导致 dr 为负而失败
+    dr = r1 - r2
     if dr <= 0.2: 
         return None, r1, r2, dr
     Z = (r1 * delta_d) / dr
@@ -446,7 +446,6 @@ def integrate_and_solve_metric_pose():
 
     # ==== 2. 高精度去旋 Looming 测距 ====
     log_print("\n👉 检验序列 1 (基准) 的连续测距掩码框...")
-    # 注意：这里直接打印，因为 process_sequence 内部没改
     process_sequence_with_cached_rois(FOLDER_PATH_1)
     saved_rois1 = load_saved_rois(ROI_PATH_1)
 
@@ -482,8 +481,8 @@ def integrate_and_solve_metric_pose():
     center1_B_looming, _ = calculate_rectangle_center(*lines1_B)
     center1_A_raw, _ = calculate_rectangle_center(*lines1_A)
 
-    # 去旋洗掉颠簸
-    center1_A_pure = derotate_point(center1_A_raw, R_12)
+    # 去旋洗掉颠簸 —— 修复：使用 A→B 旋转 (R_12.T) 而非 B→A (R_12)
+    center1_A_pure = derotate_point(center1_A_raw, R_12.T)
     
     Z_looming, r1, r2, dr = calculate_pure_looming_Z_v2(center1_B_looming, center1_A_pure, FOE, delta_d)
     if Z_looming is None: 
