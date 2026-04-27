@@ -236,7 +236,8 @@ def integrate_and_solve_metric_pose():
     pose1_A = get_closest_pose(time1_A, slam_poses1)
     pose1_B = get_closest_pose(time1_B, slam_poses1)
 
-    tx, ty, tz = calculate_relative_motion(pose1_A, pose1_B)
+    R_12, t_12 = calculate_relative_motion(pose1_A, pose1_B)
+    tx, ty, tz = t_12
     delta_d = tz
     if delta_d < 0.02:
         print(f"⚠️ 序列 1 的运动 delta_d ({delta_d:.4f}) 太小，无法计算 Looming Z！")
@@ -259,7 +260,7 @@ def integrate_and_solve_metric_pose():
     center1_B_looming, _ = calculate_rectangle_center(*lines1_B)
 
     # 获得关键深度 Z!
-    Z_looming, _, _, _ = calculate_pure_looming_Z(center1_A_looming, center1_B_looming, FOE, delta_d)
+    Z_looming, _, _, _ = calculate_pure_looming_Z(center1_A_looming, center1_B_looming, FOE, delta_d, R_12)
     if Z_looming is None:
         print("❌ 序列 1 Looming 计算失败")
         return

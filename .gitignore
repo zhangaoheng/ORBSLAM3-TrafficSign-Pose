@@ -9,6 +9,38 @@ Thirdparty/Sophus/build/
 *.a
 *.o
 
+# C++ 编译可执行文件（无扩展名）
+Examples/Monocular/mono_*
+!Examples/Monocular/mono_*.cc
+Examples/Monocular-Inertial/mono_*
+!Examples/Monocular-Inertial/mono_*.cc
+Examples/RGB-D/rgbd_*
+!Examples/RGB-D/rgbd_*.cc
+Examples/RGB-D-Inertial/rgbd_*
+!Examples/RGB-D-Inertial/rgbd_*.cc
+Examples/Stereo/stereo_*
+!Examples/Stereo/stereo_*.cc
+Examples/Stereo-Inertial/stereo_*
+!Examples/Stereo-Inertial/stereo_*.cc
+Examples/Calibration/recorder_*
+!Examples/Calibration/recorder_*.cc
+
+Examples_old/Monocular/mono_*
+!Examples_old/Monocular/mono_*.cc
+Examples_old/Monocular-Inertial/mono_*
+!Examples_old/Monocular-Inertial/mono_*.cc
+Examples_old/RGB-D/rgbd_*
+!Examples_old/RGB-D/rgbd_*.cc
+Examples_old/RGB-D-Inertial/rgbd_*
+!Examples_old/RGB-D-Inertial/rgbd_*.cc
+Examples_old/Stereo/stereo_*
+!Examples_old/Stereo/stereo_*.cc
+Examples_old/Stereo-Inertial/stereo_*
+!Examples_old/Stereo-Inertial/stereo_*.cc
+
+test/test_slam
+test/test_slam_images
+
 # === 2. ORB-SLAM3 超大字典 ===
 Vocabulary/ORBvoc.txt
 Vocabulary/*.tar.gz
@@ -47,3 +79,4 @@ landmarkslam/implement/data/deepseek/20260425_151917.bag
 landmarkslam/implement/data/deepseek/20260425_151937.bag
 landmarkslam/implement/data/deepseek/lines1/camera_intrinsics.json
 landmarkslam/implement/data/deepseek/lines2/camera_intrinsics.json
+landmarkslam/implement/data/deepseek/20260426_104450.bag

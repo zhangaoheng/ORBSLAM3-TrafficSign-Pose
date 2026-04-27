@@ -86,7 +86,7 @@ def calculate_looming_Z(P1, P2_pure, FOE, delta_d):
     if dr <= 0.2: # 像素膨胀量太小，无意义
         return None, r1, r2, dr
         
-    Z = (r1 * delta_d) / dr
+    Z = (r2 * delta_d) / dr
     return Z, r1, r2, dr
 
 # ==========================================

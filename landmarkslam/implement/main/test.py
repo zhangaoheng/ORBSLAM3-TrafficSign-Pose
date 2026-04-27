@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 import glob
 import math
+import json
 import matplotlib.pyplot as plt
 import torch
 import yaml
@@ -255,11 +256,15 @@ def edit_existing_rois(images, roi_path):
 # ==============================================================================
 # 🌟 模块 3：汉字特征提取、LoFTR 匹配及检验
 # ==============================================================================
-def detect_and_filter_lines_plslam(image_path, window_name):
+def detect_and_filter_lines_plslam(image_path, window_name, cached_pts=None):
     img = cv2.imread(image_path)
     if img is None: return [], [], (0, 0, 0, 0)
 
-    pts_poly = select_four_points(img, f"Select 4 Points: {window_name}")
+    if cached_pts is not None:
+        pts_poly = np.array(cached_pts, dtype=np.int32)
+        log_print(f"📁 命中缓存，跳过 '{window_name}' 的四选点 GUI")
+    else:
+        pts_poly = select_four_points(img, f"Select 4 Points: {window_name}")
     x, y, w, h = cv2.boundingRect(pts_poly)
     if w == 0 or h == 0: return [], [], (0, 0, 0, 0)
     img_roi = img[y:y+h, x:x+w]
@@ -324,7 +329,7 @@ def detect_and_filter_lines_plslam(image_path, window_name):
     
     return final_horizontal, final_vertical, pts_poly
 
-def match_images_with_loftr_roi(img1_color, img2_color, pts1_roi=None):
+def match_images_with_loftr_roi(img1_color, img2_color, pts1_roi=None, cached_pts2_roi=None):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log_print(f"👉 正在使用设备: {device} 运行 LoFTR")
 
@@ -332,7 +337,12 @@ def match_images_with_loftr_roi(img1_color, img2_color, pts1_roi=None):
         pts1_roi = select_four_points(img1_color, "Image 1: Select ROI for LoFTR")
     else:
         log_print(f"✅ 复用汉字骨架 ROI 作为 Image 1 LoFTR 区域，免去重复标注")
-    pts2_roi = select_four_points(img2_color, "Image 2: Select ROI for LoFTR")
+    
+    if cached_pts2_roi is not None:
+        pts2_roi = np.array(cached_pts2_roi, dtype=np.int32)
+        log_print(f"📁 命中缓存，跳过 'Image 2: Select ROI for LoFTR' 的四选点 GUI")
+    else:
+        pts2_roi = select_four_points(img2_color, "Image 2: Select ROI for LoFTR")
 
     img1_gray = cv2.cvtColor(img1_color, cv2.COLOR_BGR2GRAY)
     img2_gray = cv2.cvtColor(img2_color, cv2.COLOR_BGR2GRAY)
@@ -372,7 +382,7 @@ def match_images_with_loftr_roi(img1_color, img2_color, pts1_roi=None):
                 good_pts2.append(p2)
 
     log_print(f"🔪 经过严格 ROI 过滤，获得 {len(good_pts1)} 对纯净特征匹配点！")
-    return np.array(good_pts1), np.array(good_pts2)
+    return np.array(good_pts1), np.array(good_pts2), pts2_roi
 
 def visualize_matches_one_by_one(img1_color, img2_color, pts1, pts2, mask):
     keypoints1 = [cv2.KeyPoint(float(p[0]), float(p[1]), 1) for p in pts1]
@@ -514,6 +524,32 @@ def visualize_3d_scene(R, t, n, d, K, roi):
     plt.show()
 
 # ==============================================================================
+# 🌟 模块 5：四选点缓存管理
+# ==============================================================================
+def load_points_cache(cache_path):
+    """加载四选点缓存文件，返回 dict。文件不存在或格式错误则返回空 dict。"""
+    if not os.path.exists(cache_path):
+        return {}
+    try:
+        with open(cache_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        if isinstance(data, dict) and 'pairs' in data and isinstance(data['pairs'], dict):
+            return data['pairs']
+        return {}
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return {}
+
+def save_points_cache(cache_path, pairs):
+    """将 pairs dict 保存为 JSON。"""
+    data = {'pairs': pairs}
+    with open(cache_path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+def make_pair_key(idx1, idx2):
+    """生成帧对缓存键：'221_232'"""
+    return f"{idx1}_{idx2}"
+
+# ==============================================================================
 # 🚀 最终主流水线引擎
 # ==============================================================================
 def integrate_and_solve_metric_pose():
@@ -524,6 +560,10 @@ def integrate_and_solve_metric_pose():
     cache_file = config['Algorithm']['cache_file']
     if not os.path.isabs(cache_file):
         cache_file = os.path.join(os.path.dirname(__file__), cache_file)
+
+    points_cache_file = config['Algorithm']['points_cache_file']
+    if not os.path.isabs(points_cache_file):
+        points_cache_file = os.path.join(os.path.dirname(__file__), points_cache_file)
 
     FOLDER_PATH_1 = config['Sequence1']['image_dir']
     TRAJ_PATH_1 = config['Sequence1']['trajectory_path']
@@ -554,6 +594,11 @@ def integrate_and_solve_metric_pose():
         idx2_base = select_frame_gui(images2, idx2_base, "Sequence 2 (Lines2)")
         with open(cache_file, "w") as f: f.write(f"{idx1_base}\n{idx2_base}")
         log_print(f"👉 最终选定计算帧：Lines1_img[{idx1_base}] <---> Lines2_img[{idx2_base}]")
+
+    # 🌟 加载四选点缓存
+    pair_key = make_pair_key(idx1_base, idx2_base)
+    points_cache = load_points_cache(points_cache_file)
+    cached_data = points_cache.get(pair_key, None)
 
     # ==== 2. Looming 测距 ====
     log_print("\n👉 检验序列 1 (基准) 的连续测距掩码框...")
@@ -610,7 +655,11 @@ def integrate_and_solve_metric_pose():
     log_print("\n" + "="*40)
     log_print(" 🛠️ 阶段 1：提取汉字骨架 (提供正交先验数据)")
     log_print("="*40)
-    h_lines, v_lines, roi_target = detect_and_filter_lines_plslam(images1[idx1_base], "Image 1: Select Lines ROI")
+
+    cached_lines_pts = cached_data.get('lines_roi', None) if cached_data else None
+    h_lines, v_lines, roi_target = detect_and_filter_lines_plslam(
+        images1[idx1_base], "Image 1: Select Lines ROI", cached_pts=cached_lines_pts
+    )
     
     if len(h_lines) < 2 or len(v_lines) < 2: 
         log_print("❌ 有效线段太少，无法进行正交验证，程序终止。")
@@ -623,7 +672,20 @@ def integrate_and_solve_metric_pose():
     log_print("="*40)
     img2_base = cv2.imread(images2[idx2_base])
     
-    pts1, pts2 = match_images_with_loftr_roi(img1_B, img2_base, pts1_roi=roi_target)
+    cached_loftr_pts2 = cached_data.get('loftr_roi2', None) if cached_data else None
+    pts1, pts2, pts2_roi = match_images_with_loftr_roi(
+        img1_B, img2_base, pts1_roi=roi_target, cached_pts2_roi=cached_loftr_pts2
+    )
+    
+    # 🌟 保存四选点到缓存
+    new_cache_entry = {
+        'lines_roi': roi_target.tolist(),
+        'loftr_roi2': pts2_roi.tolist(),
+        'saved_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    }
+    points_cache[pair_key] = new_cache_entry
+    save_points_cache(points_cache_file, points_cache)
+    log_print(f"💾 四选点已缓存至 {points_cache_file} (键: {pair_key})")
     
     if pts1 is None or len(pts1) < 4:
         log_print("❌ LoFTR 有效匹配点不足，程序终止。")
