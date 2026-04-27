@@ -2,7 +2,7 @@ import os
 import glob
 
 # 替换为你的 lines2 路径
-DATA_DIR = "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/deepseek/lines1"
+DATA_DIR = "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/deepseek/lines_all"
 
 def make_associations():
     # 找 rgb 文件夹下的所有图片

@@ -12,8 +12,8 @@ import time
 import glob
 
 # ==================== 路径配置 ====================
-BAG_FILE = "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/deepseek/20260425_151917.bag"
-OUTPUT_DIR = "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/deepseek/lines1"
+BAG_FILE = "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/deepseek/20260426_104450.bag"
+OUTPUT_DIR = "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/deepseek/lines_all"
 
 # ==================== 备用内参（如果自动获取失败）====================
 DEFAULT_FX = 643.4   

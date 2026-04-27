@@ -8,10 +8,10 @@ File.version: "1.0"
 Camera.type: "PinHole"
 
 # ORB-SLAM3 特有的相机内参格式
-Camera1.fx: 643.405
-Camera1.fy: 642.347
-Camera1.cx: 657.396
-Camera1.cy: 367.508
+Camera1.fx: 426.372
+Camera1.fy: 425.671
+Camera1.cx: 435.525
+Camera1.cy: 244.974
 
 # 畸变参数
 Camera1.k1: 0.0
@@ -20,8 +20,8 @@ Camera1.p1: 0.0
 Camera1.p2: 0.0
 
 # 以下为相机全局属性
-Camera.width: 1280
-Camera.height: 720
+Camera.width: 848
+Camera.height: 480
 Camera.fps: 30
 
 # Color order of the images (0: BGR, 1: RGB)
@@ -56,3 +56,7 @@ Viewer.ViewpointX: 0.0
 Viewer.ViewpointY: -0.7
 Viewer.ViewpointZ: -1.8
 Viewer.ViewpointF: 500.0
+
+System.SaveAtlasToFile: ""
+System.LoadAtlasFromFile: ""
+System.thFarPoints: 100.0

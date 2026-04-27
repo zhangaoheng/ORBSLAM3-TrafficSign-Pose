@@ -7,7 +7,7 @@ import math
 import matplotlib.pyplot as plt
 import torch
 import yaml
-import datetime  # 🌟 新增：用于实验时间戳
+import datetime
 from kornia.feature import LoFTR
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from scipy.spatial.transform import Rotation as R_scipy
@@ -27,12 +27,11 @@ from mid_FOE_Z_d.pure_looming_depth import (
 from mid_FOE_Z_d.imgs_mid import process_sequence_with_cached_rois
 
 # ==============================================================================
-# 🌟 全局日志记录器 (将所有输出同步保存到 txt 文件)
+# 🌟 全局日志记录器
 # ==============================================================================
 LOG_FILE_PATH = os.path.join(os.path.dirname(__file__), "experiment_results.txt")
 
 def log_print(*args, **kwargs):
-    """自定义打印函数：同时输出到终端并追加保存到文件"""
     msg = " ".join(map(str, args))
     print(msg, **kwargs)
     with open(LOG_FILE_PATH, "a", encoding="utf-8") as f:
@@ -43,13 +42,12 @@ def log_print(*args, **kwargs):
 # ==============================================================================
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 if not os.path.exists(CONFIG_PATH):
-    log_print(f"❌ 找不到配置文件: {CONFIG_PATH}，请确保它与此脚本在同一目录下！")
+    log_print(f"❌ 找不到配置文件: {CONFIG_PATH}")
     sys.exit(1)
 
 with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
     config = yaml.safe_load(f)
 
-# ==== 读取相机内参 ====
 fx = config['Camera']['fx']
 fy = config['Camera']['fy']
 cx = config['Camera']['cx']
@@ -60,7 +58,6 @@ K = np.array([[fx,  0, cx],
               [ 0,  0,  1]], dtype=np.float64)
 K_inv = np.linalg.inv(K)
 
-# ==== 读取算法超参数 ====
 FRAME_STEP = config['Algorithm']['frame_step']
 
 # ==============================================================================
@@ -77,7 +74,6 @@ def derotate_point(P_raw, R_12):
 def calculate_pure_looming_Z_v2(P1, P2_pure, FOE, delta_d):
     r1 = math.sqrt((P1[0] - FOE[0])**2 + (P1[1] - FOE[1])**2)
     r2 = math.sqrt((P2_pure[0] - FOE[0])**2 + (P2_pure[1] - FOE[1])**2)
-    # 修复：膨胀量应该是当前帧距FOE距离减去前一帧距FOE距离（相机向前，目标像膨胀）
     dr = r1 - r2
     if dr <= 0.2: 
         return None, r1, r2, dr
@@ -141,6 +137,120 @@ def select_four_points(img, window_name):
     cv2.waitKey(500)
     cv2.destroyWindow(window_name)
     return np.array(points, dtype=np.int32)
+
+# ==============================================================================
+# 🌟 增强的 ROI 编辑工具（显示线检测、角点、中心）
+# ==============================================================================
+def edit_existing_rois(images, roi_path):
+    """
+    浏览并修正已标注的 ROI，同时显示几何推演结果。
+    格式：每行 x,y,w,h
+    操作：A/D 翻帧，E 重新标注，Q 保存并退出。
+    """
+    # 读取现有 ROI
+    rois = []
+    if os.path.exists(roi_path):
+        with open(roi_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                rois.append(line)
+    while len(rois) < len(images):
+        rois.append('')
+
+    idx = 0
+    win_name = "Fix ROI | A/D: prev/next | E: re-annotate | Q: save & continue"
+    cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
+
+    def parse_rect(line_str):
+        if not line_str:
+            return None
+        parts = line_str.split(',')
+        if len(parts) != 4:
+            return None
+        try:
+            x, y, w, h = map(int, parts)
+            return (x, y, w, h)
+        except:
+            return None
+
+    while True:
+        img = cv2.imread(images[idx])
+        if img is None:
+            idx = (idx + 1) % len(images)
+            continue
+
+        disp = img.copy()
+        rect = parse_rect(rois[idx])
+
+        if rect:
+            x, y, w, h = rect
+            # 调用几何推演管线
+            lines = extract_four_lines_from_real_image(img, rect)
+            if lines is not None:
+                line_top, line_bottom, line_left, line_right = lines
+                center, corners = calculate_rectangle_center(line_top, line_bottom, line_left, line_right)
+
+                if center is not None and corners is not None:
+                    cx, cy = center
+                    tl, tr, bl, br = corners
+
+                    # 绘制四边形框
+                    cv2.polylines(disp, [np.array([tl, tr, br, bl])], isClosed=True, color=(0, 255, 255), thickness=1)
+
+                    # 绘制四条延长线 (蓝色)
+                    cv2.line(disp, (line_top[0], line_top[1]), (line_top[2], line_top[3]), (255, 0, 0), 1)
+                    cv2.line(disp, (line_bottom[0], line_bottom[1]), (line_bottom[2], line_bottom[3]), (255, 0, 0), 1)
+                    cv2.line(disp, (line_left[0], line_left[1]), (line_left[2], line_left[3]), (255, 0, 0), 1)
+                    cv2.line(disp, (line_right[0], line_right[1]), (line_right[2], line_right[3]), (255, 0, 0), 1)
+
+                    # 四个角点与对角线 (黄点 + 绿线)
+                    for pt in [tl, tr, br, bl]:
+                        cv2.circle(disp, pt, 5, (0, 255, 255), -1)
+                    cv2.line(disp, tl, br, (0, 255, 0), 1)
+                    cv2.line(disp, tr, bl, (0, 255, 0), 1)
+
+                    # 中心十字准星 (红色)
+                    cv2.line(disp, (cx - 20, cy), (cx + 20, cy), (0, 0, 255), 2)
+                    cv2.line(disp, (cx, cy - 20), (cx, cy + 20), (0, 0, 255), 2)
+                    cv2.circle(disp, center, 4, (0, 0, 255), -1)
+
+                    mode_text = "Geometry View"
+                else:
+                    mode_text = "Center lost"
+            else:
+                mode_text = "Lines lost"
+        else:
+            mode_text = "No ROI"
+
+        # 状态信息
+        info = f"Frame {idx}/{len(images)-1} | {mode_text}"
+        cv2.putText(disp, info, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        cv2.putText(disp, "[A/Left]:Prev [D/Right]:Next [E]:Re-annotate [Q]:Save&Continue",
+                    (10, disp.shape[0]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.imshow(win_name, disp)
+
+        key = cv2.waitKey(0) & 0xFF
+        if key == ord('q'):
+            with open(roi_path, 'w') as f:
+                for r in rois:
+                    f.write(r + '\n')
+            log_print(f"✅ ROI 修正已保存至 {roi_path}")
+            break
+        elif key == ord('d') or key == 83:
+            idx = (idx + 1) % len(images)
+        elif key == ord('a') or key == 81:
+            idx = (idx - 1) % len(images)
+        elif key == ord('e'):
+            new_roi = cv2.selectROI(f"Re-annotate Frame {idx}", img, fromCenter=False, showCrosshair=True)
+            cv2.destroyWindow(f"Re-annotate Frame {idx}")
+            if new_roi[2] > 0 and new_roi[3] > 0:
+                x, y, w, h = new_roi
+                rois[idx] = f"{x},{y},{w},{h}"
+                log_print(f"   ✅ 帧 {idx} 已更新为: {rois[idx]}")
+            else:
+                log_print(f"   ⚠️ 帧 {idx} 取消框选")
+
+    cv2.destroyWindow(win_name)
 
 # ==============================================================================
 # 🌟 模块 3：汉字特征提取、LoFTR 匹配及检验
@@ -214,11 +324,14 @@ def detect_and_filter_lines_plslam(image_path, window_name):
     
     return final_horizontal, final_vertical, pts_poly
 
-def match_images_with_loftr_roi(img1_color, img2_color):
+def match_images_with_loftr_roi(img1_color, img2_color, pts1_roi=None):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log_print(f"👉 正在使用设备: {device} 运行 LoFTR")
 
-    pts1_roi = select_four_points(img1_color, "Image 1: Select ROI for LoFTR")
+    if pts1_roi is None:
+        pts1_roi = select_four_points(img1_color, "Image 1: Select ROI for LoFTR")
+    else:
+        log_print(f"✅ 复用汉字骨架 ROI 作为 Image 1 LoFTR 区域，免去重复标注")
     pts2_roi = select_four_points(img2_color, "Image 2: Select ROI for LoFTR")
 
     img1_gray = cv2.cvtColor(img1_color, cv2.COLOR_BGR2GRAY)
@@ -404,12 +517,10 @@ def visualize_3d_scene(R, t, n, d, K, roi):
 # 🚀 最终主流水线引擎
 # ==============================================================================
 def integrate_and_solve_metric_pose():
-    # 🌟 写入实验时间戳边界
     log_print("\n\n" + "="*80)
     log_print(f"🚀 [EXPERIMENT START] Time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     log_print("="*80)
 
-    # ==== 从 YAML 文件加载配置 ====
     cache_file = config['Algorithm']['cache_file']
     if not os.path.isabs(cache_file):
         cache_file = os.path.join(os.path.dirname(__file__), cache_file)
@@ -429,7 +540,7 @@ def integrate_and_solve_metric_pose():
     log_print(f">>> 🚀 启动 [物理度量恢复] 跨序列双剑合璧！")
     log_print(f">>> 逻辑树：GUI选帧 -> Looming去旋测距 -> 画框提取汉字骨架 -> LoFTR特征匹配算H -> 正交筛选 -> 绝对平移")
     
-    # ==== 1. GUI 手动挑选计算帧 ====
+    # ==== 1. GUI 选帧 ====
     idx1_base, idx2_base = 0, 0 
     if os.path.exists(cache_file):
         with open(cache_file, "r") as f:
@@ -444,9 +555,14 @@ def integrate_and_solve_metric_pose():
         with open(cache_file, "w") as f: f.write(f"{idx1_base}\n{idx2_base}")
         log_print(f"👉 最终选定计算帧：Lines1_img[{idx1_base}] <---> Lines2_img[{idx2_base}]")
 
-    # ==== 2. 高精度去旋 Looming 测距 ====
+    # ==== 2. Looming 测距 ====
     log_print("\n👉 检验序列 1 (基准) 的连续测距掩码框...")
     process_sequence_with_cached_rois(FOLDER_PATH_1)
+    
+    # 🌟 回溯修正 ROI（现在会显示几何推演细节）
+    log_print("\n🔧 是否需要修正 ROI 标注？在窗口中按 E 编辑错误帧，按 Q 保存并继续。")
+    edit_existing_rois(images1, ROI_PATH_1)
+    
     saved_rois1 = load_saved_rois(ROI_PATH_1)
 
     idx1_prev = idx1_base - FRAME_STEP
@@ -481,7 +597,6 @@ def integrate_and_solve_metric_pose():
     center1_B_looming, _ = calculate_rectangle_center(*lines1_B)
     center1_A_raw, _ = calculate_rectangle_center(*lines1_A)
 
-    # 去旋洗掉颠簸 —— 修复：使用 A→B 旋转 (R_12.T) 而非 B→A (R_12)
     center1_A_pure = derotate_point(center1_A_raw, R_12.T)
     
     Z_looming, r1, r2, dr = calculate_pure_looming_Z_v2(center1_B_looming, center1_A_pure, FOE, delta_d)
@@ -491,7 +606,7 @@ def integrate_and_solve_metric_pose():
     
     log_print(f"[Lines1 内部] ✅ (被动测距模块) FOE 物理深度计算成功: Z = {Z_looming:.3f} m (dr = {dr:.2f}px)")
 
-    # ==== 3. 提取汉字骨架 (包含1次 4点选区弹窗) ====
+    # ==== 3. 汉字骨架 ====
     log_print("\n" + "="*40)
     log_print(" 🛠️ 阶段 1：提取汉字骨架 (提供正交先验数据)")
     log_print("="*40)
@@ -502,13 +617,13 @@ def integrate_and_solve_metric_pose():
         sys.exit(1)
     log_print(f"✅ 成功提取汉字骨架：横向 {len(h_lines)} 条，竖向 {len(v_lines)} 条。")
 
-    # ==== 4. 启动 LoFTR 匹配引擎 (包含2次 4点选区弹窗) ====
+    # ==== 4. LoFTR 匹配 ====
     log_print("\n" + "="*40)
     log_print(" 🛠️ 阶段 2：启动 LoFTR 引擎解算数学位姿")
     log_print("="*40)
     img2_base = cv2.imread(images2[idx2_base])
     
-    pts1, pts2 = match_images_with_loftr_roi(img1_A, img2_base)
+    pts1, pts2 = match_images_with_loftr_roi(img1_B, img2_base, pts1_roi=roi_target)
     
     if pts1 is None or len(pts1) < 4:
         log_print("❌ LoFTR 有效匹配点不足，程序终止。")
@@ -523,9 +638,9 @@ def integrate_and_solve_metric_pose():
     log_print("--- 高精度单应性矩阵 H ---")
     log_print(np.round(H, 4))
 
-    visualize_matches_one_by_one(img1_A, img2_base, pts1, pts2, mask)
+    visualize_matches_one_by_one(img1_B, img2_base, pts1, pts2, mask)
 
-    # ==== 5. 正交验证与姿态筛选 ====
+    # ==== 5. 正交筛选 ====
     num_solutions, rotations, translations, normals = cv2.decomposeHomographyMat(H, K)
     log_print(f"\n✅ 成功分解出 {num_solutions} 组位姿解。")
 
@@ -552,7 +667,7 @@ def integrate_and_solve_metric_pose():
     best_n = normals[best_idx].flatten()
     log_print(f"🎉 验算完毕！【解 {best_idx+1}】完美通过汉字 3D 正交检验，是唯一真实姿态！")
 
-    # ==== 6. 还原绝对平移与可视化 ====
+    # ==== 6. 绝对平移还原 ====
     p_2d = np.array([center1_B_looming[0], center1_B_looming[1], 1.0]).reshape(3, 1)
     ray = K_inv @ p_2d
     
@@ -569,7 +684,7 @@ def integrate_and_solve_metric_pose():
     log_print("="*40)
 
     log_print("\n🎨 正在启动 3D 姿态与图像联合可视化窗口 (可拖拽旋转)...")
-    visualize_dashboard(img1_A, img2_base, best_R, t_real, X_3d, best_n)
+    visualize_dashboard(img1_B, img2_base, best_R, t_real, X_3d, best_n)
     
     log_print("\n🎨 正在启动带有真实纸张物理形变的 3D 窗口...")
     visualize_3d_scene(best_R, t_real, best_n, d, K, roi_target)
