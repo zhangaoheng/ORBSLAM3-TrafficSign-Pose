@@ -95,8 +95,9 @@ def calculate_pure_looming_Z(P_center_far, P_center_near, FOE, delta_d, R_12=Non
     if dr <= 0.5:
         return None, r_far, r_near, dr
 
-    # Z = r_near * delta_d / dr （用较近帧距离，公式源自 r_near/r_far = Z/(Z-delta_d)）
-    Z = (r_near * delta_d) / dr
+    # Z = r_near * delta_d / dr - delta_d
+    # 推导：r_far / r_near = Z / (Z + delta_d)，展开得 Z = r_near * delta_d / dr - delta_d
+    Z = (r_near * delta_d) / dr - delta_d
     return Z, r_far, r_near, dr
 
 # ==========================================

@@ -12,12 +12,12 @@ Camera:
 # 2. 算法全局超参数
 Algorithm:
   frame_step: 15  # Looming 跨帧步长 (拉大基线，建议 5 到 15)
-  cache_file: "selected_frames_cache.txt"  # GUI 选帧缓存文件名
-  points_cache_file: "selected_points_cache.json"  # 四选点缓存文件名
+  cache_file: "selected_frames_cache.json"  # 统一缓存文件（帧号 + 四选点）
 
 # 3. 序列 1 配置 (提供基准、Looming 连续测距、提取汉字骨架)
 Sequence1:
   image_dir: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/deepseek/lines1/rgb"
+  depth_dir: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/deepseek/lines1/depth"
   trajectory_path: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/deepseek/lines1/trajectory.txt"
   roi_path: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/deepseek/lines1/rgb/saved_rois.txt"
 

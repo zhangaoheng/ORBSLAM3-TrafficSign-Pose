@@ -5,6 +5,7 @@ import numpy as np
 import glob
 import math
 import json
+import re
 import matplotlib.pyplot as plt
 import torch
 import yaml
@@ -31,12 +32,23 @@ from mid_FOE_Z_d.imgs_mid import process_sequence_with_cached_rois
 # 🌟 全局日志记录器
 # ==============================================================================
 LOG_FILE_PATH = os.path.join(os.path.dirname(__file__), "experiment_results.txt")
+_log_file_initialized = False
+QUIET_MODE = False
 
 def log_print(*args, **kwargs):
+    global _log_file_initialized
     msg = " ".join(map(str, args))
-    print(msg, **kwargs)
-    with open(LOG_FILE_PATH, "a", encoding="utf-8") as f:
+    # 静默模式：跳过 print，日志始终追加
+    if not QUIET_MODE:
+        print(msg, **kwargs)
+    # quiet 模式始终追加，非 quiet 模式首次覆写后续追加
+    if QUIET_MODE:
+        mode = "a"
+    else:
+        mode = "w" if not _log_file_initialized else "a"
+    with open(LOG_FILE_PATH, mode, encoding="utf-8") as f:
         f.write(msg + "\n")
+    _log_file_initialized = True
 
 # ==============================================================================
 # 🌟 全局加载 YAML 配置文件
@@ -73,13 +85,20 @@ def derotate_point(P_raw, R_12):
     return (u_pure, v_pure)
 
 def calculate_pure_looming_Z_v2(P1, P2_pure, FOE, delta_d):
-    r1 = math.sqrt((P1[0] - FOE[0])**2 + (P1[1] - FOE[1])**2)
-    r2 = math.sqrt((P2_pure[0] - FOE[0])**2 + (P2_pure[1] - FOE[1])**2)
-    dr = r1 - r2
-    if dr <= 0.2: 
-        return None, r1, r2, dr
-    Z = (r1 * delta_d) / dr
-    return Z, r1, r2, dr
+    """
+    Looming 测距公式（修正版）。
+    P1: 近帧 ROI 中心（原始坐标），对应 r_near
+    P2_pure: 远帧 ROI 中心（去旋后），对应 r_far
+    公式：Z = r_near * Δd / dr - Δd （或等价 Z = r_far * Δd / dr）
+    推导：r_far / r_near = Z / (Z + Δd)，故 Z = r_far * Δd / (r_near - r_far)
+    """
+    r_near = math.sqrt((P1[0] - FOE[0])**2 + (P1[1] - FOE[1])**2)
+    r_far = math.sqrt((P2_pure[0] - FOE[0])**2 + (P2_pure[1] - FOE[1])**2)
+    dr = r_near - r_far
+    if dr <= 0.2:
+        return None, r_near, r_far, dr
+    Z = r_near * delta_d / dr - delta_d
+    return Z, r_near, r_far, dr
 
 def calculate_motion_rt(pose1, pose2):
     t1, q1 = pose1[0:3], pose1[3:7]
@@ -192,7 +211,7 @@ def edit_existing_rois(images, roi_path):
                 center, corners = calculate_rectangle_center(line_top, line_bottom, line_left, line_right)
 
                 if center is not None and corners is not None:
-                    cx, cy = center
+                    cx_int, cy_int = center
                     tl, tr, bl, br = corners
 
                     # 绘制四边形框
@@ -211,8 +230,8 @@ def edit_existing_rois(images, roi_path):
                     cv2.line(disp, tr, bl, (0, 255, 0), 1)
 
                     # 中心十字准星 (红色)
-                    cv2.line(disp, (cx - 20, cy), (cx + 20, cy), (0, 0, 255), 2)
-                    cv2.line(disp, (cx, cy - 20), (cx, cy + 20), (0, 0, 255), 2)
+                    cv2.line(disp, (cx_int - 20, cy_int), (cx_int + 20, cy_int), (0, 0, 255), 2)
+                    cv2.line(disp, (cx_int, cy_int - 20), (cx_int, cy_int + 20), (0, 0, 255), 2)
                     cv2.circle(disp, center, 4, (0, 0, 255), -1)
 
                     mode_text = "Geometry View"
@@ -302,21 +321,21 @@ def detect_and_filter_lines_plslam(image_path, window_name, cached_pts=None):
     final_horizontal, final_vertical = [], []
     
     if len(all_valid_lines) > 0:
-        centers = np.array([[(l[0]+l[2])/2.0, (l[1]+l[3])/2.0] for l in all_valid_lines])
-        centroid = np.mean(centers, axis=0)
-        distances = np.linalg.norm(centers - centroid, axis=1)
+        centers_arr = np.array([[(l[0]+l[2])/2.0, (l[1]+l[3])/2.0] for l in all_valid_lines])
+        centroid = np.mean(centers_arr, axis=0)
+        distances = np.linalg.norm(centers_arr - centroid, axis=1)
         mean_dist, std_dev = np.mean(distances), np.std(distances)
         radius_threshold = max(mean_dist + 2.0 * std_dev, 80.0)
 
         for l in temp_horizontal:
-            cx, cy = (l[0]+l[2])/2.0, (l[1]+l[3])/2.0
-            if np.sqrt((cx - centroid[0])**2 + (cy - centroid[1])**2) <= radius_threshold:
+            cx_line, cy_line = (l[0]+l[2])/2.0, (l[1]+l[3])/2.0
+            if np.sqrt((cx_line - centroid[0])**2 + (cy_line - centroid[1])**2) <= radius_threshold:
                 final_horizontal.append(l)
                 cv2.line(result_img, (int(l[0]), int(l[1])), (int(l[2]), int(l[3])), (255, 0, 0), 2)
                 
         for l in temp_vertical:
-            cx, cy = (l[0]+l[2])/2.0, (l[1]+l[3])/2.0
-            if np.sqrt((cx - centroid[0])**2 + (cy - centroid[1])**2) <= radius_threshold:
+            cx_line, cy_line = (l[0]+l[2])/2.0, (l[1]+l[3])/2.0
+            if np.sqrt((cx_line - centroid[0])**2 + (cy_line - centroid[1])**2) <= radius_threshold:
                 final_vertical.append(l)
                 cv2.line(result_img, (int(l[0]), int(l[1])), (int(l[2]), int(l[3])), (0, 0, 255), 2)
 
@@ -420,9 +439,9 @@ def visualize_matches_one_by_one(img1_color, img2_color, pts1, pts2, mask):
 # ==============================================================================
 # 🌟 模块 4：3D 正交验证与可视化引擎
 # ==============================================================================
-def backproject_line_to_plane(line_2d, n, K_inv):
-    ray1 = K_inv @ np.array([line_2d[0], line_2d[1], 1.0])
-    ray2 = K_inv @ np.array([line_2d[2], line_2d[3], 1.0])
+def backproject_line_to_plane(line_2d, n, K_inv_local):
+    ray1 = K_inv_local @ np.array([line_2d[0], line_2d[1], 1.0])
+    ray2 = K_inv_local @ np.array([line_2d[2], line_2d[3], 1.0])
     dot1, dot2 = np.dot(n, ray1), np.dot(n, ray2)
     if abs(dot1) < 1e-6 or abs(dot2) < 1e-6: return None
     P1_3d = (1.0 / dot1) * ray1
@@ -432,12 +451,12 @@ def backproject_line_to_plane(line_2d, n, K_inv):
     if norm < 1e-6: return None
     return vec_3d / norm
 
-def evaluate_orthogonality(h_lines, v_lines, n, K):
-    K_inv = np.linalg.inv(K)
+def evaluate_orthogonality(h_lines, v_lines, n, K_local):
+    K_inv_local = np.linalg.inv(K_local)
     h_lines_sorted = sorted(h_lines, key=lambda l: (l[2]-l[0])**2 + (l[3]-l[1])**2, reverse=True)[:15]
     v_lines_sorted = sorted(v_lines, key=lambda l: (l[2]-l[0])**2 + (l[3]-l[1])**2, reverse=True)[:15]
-    h_vecs_3d = [v for v in [backproject_line_to_plane(l, n, K_inv) for l in h_lines_sorted] if v is not None]
-    v_vecs_3d = [v for v in [backproject_line_to_plane(l, n, K_inv) for l in v_lines_sorted] if v is not None]
+    h_vecs_3d = [v for v in [backproject_line_to_plane(l, n, K_inv_local) for l in h_lines_sorted] if v is not None]
+    v_vecs_3d = [v for v in [backproject_line_to_plane(l, n, K_inv_local) for l in v_lines_sorted] if v is not None]
     if not h_vecs_3d or not v_vecs_3d: return float('inf')
     ortho_error, count = 0.0, 0
     for vh in h_vecs_3d:
@@ -446,16 +465,16 @@ def evaluate_orthogonality(h_lines, v_lines, n, K):
             count += 1
     return ortho_error / count if count > 0 else float('inf')
 
-def draw_camera(ax, R, t, label, scale=0.4, color='black'):
-    t = t.flatten()
-    ax.scatter(*t, color=color, s=50)
-    ax.text(t[0], t[1], t[2], f'  {label}', fontsize=10, weight='bold', color=color)
-    x_ax = t + R @ np.array([scale, 0, 0])
-    y_ax = t + R @ np.array([0, scale, 0])
-    z_ax = t + R @ np.array([0, 0, scale])
-    ax.plot([t[0], x_ax[0]], [t[1], x_ax[1]], [t[2], x_ax[2]], color='r', linewidth=2)
-    ax.plot([t[0], y_ax[0]], [t[1], y_ax[1]], [t[2], y_ax[2]], color='g', linewidth=2)
-    ax.plot([t[0], z_ax[0]], [t[1], z_ax[1]], [t[2], z_ax[2]], color='b', linewidth=2)
+def draw_camera(ax, R_local, t, label, scale=0.4, color='black'):
+    t_flat = t.flatten()
+    ax.scatter(*t_flat, color=color, s=50)
+    ax.text(t_flat[0], t_flat[1], t_flat[2], f'  {label}', fontsize=10, weight='bold', color=color)
+    x_ax = t_flat + R_local @ np.array([scale, 0, 0])
+    y_ax = t_flat + R_local @ np.array([0, scale, 0])
+    z_ax = t_flat + R_local @ np.array([0, 0, scale])
+    ax.plot([t_flat[0], x_ax[0]], [t_flat[1], x_ax[1]], [t_flat[2], x_ax[2]], color='r', linewidth=2)
+    ax.plot([t_flat[0], y_ax[0]], [t_flat[1], y_ax[1]], [t_flat[2], y_ax[2]], color='g', linewidth=2)
+    ax.plot([t_flat[0], z_ax[0]], [t_flat[1], z_ax[1]], [t_flat[2], z_ax[2]], color='b', linewidth=2)
 
 def visualize_dashboard(img1, img2, R_rel, t_real, X_3d, n_cv):
     fig = plt.figure(figsize=(18, 6))
@@ -485,7 +504,7 @@ def visualize_dashboard(img1, img2, R_rel, t_real, X_3d, n_cv):
     plt.tight_layout()
     plt.show()
 
-def visualize_3d_scene(R, t, n, d, K, roi):
+def visualize_3d_scene(R, t, n, d, K_local, roi):
     fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111, projection='3d')
     ax.set_title("SLAM 3D Viewer: Relative Pose & True Planar Target", fontsize=14)
@@ -503,8 +522,9 @@ def visualize_3d_scene(R, t, n, d, K, roi):
     diff = np.diff(pts, axis=1)
     rect[1], rect[3] = pts[np.argmin(diff)], pts[np.argmax(diff)]
     
+    K_inv_local = np.linalg.inv(K_local)
     def get_3d_point(p_2d):
-        ray = K_inv @ np.array([p_2d[0], p_2d[1], 1.0])
+        ray = K_inv_local @ np.array([p_2d[0], p_2d[1], 1.0])
         return (d / np.dot(n, ray)) * ray
         
     P_TL, P_TR, P_BR, P_BL = get_3d_point(rect[0]), get_3d_point(rect[1]), get_3d_point(rect[2]), get_3d_point(rect[3])
@@ -526,28 +546,205 @@ def visualize_3d_scene(R, t, n, d, K, roi):
 # ==============================================================================
 # 🌟 模块 5：四选点缓存管理
 # ==============================================================================
-def load_points_cache(cache_path):
-    """加载四选点缓存文件，返回 dict。文件不存在或格式错误则返回空 dict。"""
+def load_cache(cache_path):
+    """加载统一缓存文件，返回 dict。文件不存在或格式错误则返回空 dict。"""
     if not os.path.exists(cache_path):
         return {}
     try:
         with open(cache_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        if isinstance(data, dict) and 'pairs' in data and isinstance(data['pairs'], dict):
-            return data['pairs']
+        if isinstance(data, dict):
+            return data
         return {}
-    except (json.JSONDecodeError, KeyError, TypeError):
+    except (json.JSONDecodeError, TypeError):
         return {}
 
-def save_points_cache(cache_path, pairs):
-    """将 pairs dict 保存为 JSON。"""
-    data = {'pairs': pairs}
+def save_cache(cache_path, data):
+    """将 data dict 保存为 JSON。"""
     with open(cache_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 def make_pair_key(idx1, idx2):
     """生成帧对缓存键：'221_232'"""
     return f"{idx1}_{idx2}"
+
+# ==============================================================================
+# 🌟 模块 6：精度评估引擎（对比深度真值、法向量、绝对位姿）
+# ==============================================================================
+def _load_tum_list(filename):
+    """读取 TUM 轨迹文件，返回列表 [(timestamp, [tx,ty,tz,qx,qy,qz,qw])]"""
+    traj = []
+    with open(filename, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            parts = line.split()
+            ts = float(parts[0])
+            data = [float(x) for x in parts[1:8]]
+            traj.append((ts, data))
+    return traj
+
+def get_gt_depth(depth_dir, img_idx, center_x, center_y):
+    """通过索引读取深度图，返回 (深度_米, 深度图文件名)"""
+    depth_files = sorted(os.listdir(depth_dir))
+    if img_idx >= len(depth_files):
+        log_print(f"❌ 深度图索引 {img_idx} 超出范围 ({len(depth_files)})")
+        return None, None
+    fname = depth_files[img_idx]
+    depth_path = os.path.join(depth_dir, fname)
+    depth_mm = cv2.imread(depth_path, -1)
+    if depth_mm is None:
+        log_print(f"❌ 无法读取深度图: {depth_path}")
+        return None, None
+    # 3x3 邻域中值 (忽略0)
+    x, y = int(center_x), int(center_y)
+    patch = depth_mm[max(0, y-1):y+2, max(0, x-1):x+2]
+    patch = patch[patch > 0]
+    if len(patch) == 0:
+        log_print(f"⚠️  像素 ({x},{y}) 周围无有效深度值")
+        return None, None
+    Z_gt = np.median(patch) / 1000.0   # 毫米转米
+    return Z_gt, fname
+
+def fit_plane_from_depth(depth_dir, img_idx, roi_polygon):
+    """利用深度图和ROI多边形内的点拟合平面方程 n·X = d (n单位化)"""
+    depth_files = sorted(os.listdir(depth_dir))
+    if img_idx >= len(depth_files):
+        return None, None, None
+    fname = depth_files[img_idx]
+    depth_path = os.path.join(depth_dir, fname)
+    depth_mm = cv2.imread(depth_path, -1)
+    if depth_mm is None:
+        return None, None, None
+    # 在ROI多边形内采样点
+    mask = np.zeros(depth_mm.shape, dtype=np.uint8)
+    cv2.fillPoly(mask, [np.array(roi_polygon, dtype=np.int32)], 255)
+    ys, xs = np.where(mask > 0)
+    points_3d = []
+    for i in range(len(xs)):
+        x, y = xs[i], ys[i]
+        Z_mm = depth_mm[y, x]
+        if Z_mm <= 0:
+            continue
+        Z_m = Z_mm / 1000.0
+        pt = np.array([x, y, 1.0])
+        ray = K_inv @ pt
+        X_3d = ray * (Z_m / ray[2])
+        points_3d.append(X_3d)
+    if len(points_3d) < 3:
+        return None, None, None
+    points = np.array(points_3d)
+    A = np.c_[points[:, 0], points[:, 1], np.ones(points.shape[0])]
+    b = -points[:, 2]
+    coeff, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
+    a, b_coeff, d = coeff
+    n_raw = np.array([a, b_coeff, 1.0])
+    n = n_raw / np.linalg.norm(n_raw)
+    if n[2] < 0:
+        n = -n
+        d = -d
+    return n, d, fname
+
+def evaluate_accuracy(idx1_prev, idx1_base, idx2_base, Z_looming, dr, delta_d,
+                      best_R, t_real, best_n, roi_target,
+                      traj1_path, traj2_path, depth_dir, roi_path_seq1):
+    """精度评估：对比深度真值、法向量、绝对位姿"""
+    log_print("\n\n" + "="*60)
+    log_print("🎯 精度评估开始")
+    log_print("="*60)
+
+    # 加载两个序列的 TUM 轨迹
+    traj1 = _load_tum_list(traj1_path)
+    traj2 = _load_tum_list(traj2_path)
+
+    # 1. 获取真实相对位姿 (pose A → pose C)
+    if idx1_prev >= len(traj1) or idx2_base >= len(traj2):
+        log_print("❌ 轨迹索引超出范围")
+        return
+
+    pose_A_arr = np.array(traj1[idx1_prev][1])
+    pose_C_arr = np.array(traj2[idx2_base][1])
+    R_gt, t_gt = calculate_motion_rt(pose_A_arr, pose_C_arr)
+
+    # 2. 从 saved_rois 提取 ROI 中心 (用于深度真值采样)
+    roi_polygon = None
+    center_x, center_y = None, None
+    if os.path.exists(roi_path_seq1):
+        with open(roi_path_seq1, 'r') as f:
+            lines = f.readlines()
+        if idx1_base < len(lines):
+            roi_line = lines[idx1_base].strip()
+            coords = [int(float(x)) for x in re.split(r'[ ,\t]+', roi_line) if x != '']
+            if len(coords) >= 4:
+                if len(coords) == 8:
+                    pts = np.array([[coords[i], coords[i+1]] for i in range(0, 8, 2)])
+                elif len(coords) == 4:
+                    # ROI 格式为 x,y,w,h，中心为 x+w/2, y+h/2
+                    cx_r = coords[0] + coords[2] / 2.0
+                    cy_r = coords[1] + coords[3] / 2.0
+                    pts = np.array([[coords[0], coords[1]],
+                                    [coords[0] + coords[2], coords[1]],
+                                    [coords[0] + coords[2], coords[1] + coords[3]],
+                                    [coords[0], coords[1] + coords[3]]])
+                else:
+                    pts = None
+                if pts is not None:
+                    center = np.mean(pts, axis=0)
+                    center_x, center_y = center[0], center[1]
+                    log_print(f"✅ 从 saved_rois 提取 ROI 中心: ({center_x:.1f}, {center_y:.1f})")
+                    roi_polygon = pts.astype(int).tolist()
+
+    if center_x is None:
+        # fallback: 使用 roi_target 多边形中心
+        log_print("⚠️  无法从 saved_rois 提取中心，使用 roi_target 多边形中心")
+        center_x, center_y = np.mean(roi_target, axis=0)
+        roi_polygon = roi_target.tolist()
+
+    # 3. 深度真值对比
+    Z_gt, depth_fname = get_gt_depth(depth_dir, idx1_base, center_x, center_y)
+    if Z_gt is not None:
+        log_print(f"📏 深度真值 (帧{idx1_base}): {Z_gt:.4f} m   (深度图: {depth_fname})")
+        err_abs = abs(Z_looming - Z_gt)
+        err_rel = err_abs / Z_gt * 100
+        log_print(f"✅ Looming 深度误差: {err_abs:.4f} m, 相对误差: {err_rel:.2f}%")
+
+    # 4. 拟合平面获取真实法向量
+    n_gt = None
+    if roi_polygon is not None and depth_dir:
+        n_gt, _, _ = fit_plane_from_depth(depth_dir, idx1_base, roi_polygon)
+
+    # 5. 跨序列绝对位姿误差
+    t_est_vec = t_real.flatten()
+    t_err = np.linalg.norm(t_est_vec - t_gt)
+    gt_len = np.linalg.norm(t_gt)
+    t_err_rel = t_err / gt_len * 100 if gt_len > 0 else 0
+    # 旋转误差
+    R_diff = best_R.T @ R_gt
+    rot_err_rad = np.arccos(np.clip((np.trace(R_diff) - 1) / 2.0, -1, 1))
+    rot_err_deg = math.degrees(rot_err_rad)
+
+    log_print(f"\n--- 跨序列绝对位姿精度 ---")
+    log_print(f"真实平移 t_gt: {t_gt.flatten()} m")
+    log_print(f"估计平移 t_est: {t_est_vec}")
+    log_print(f"平移误差 (欧式距离): {t_err:.4f} m, 相对错误: {t_err_rel:.2f}%")
+    log_print(f"真实旋转矩阵 R_gt:\n{np.round(R_gt, 4)}")
+    log_print(f"估计旋转矩阵 R_est:\n{np.round(best_R, 4)}")
+    log_print(f"旋转误差: {rot_err_deg:.4f}°")
+
+    # 6. 正交筛选命中率
+    if n_gt is not None:
+        angle = math.degrees(math.acos(min(np.abs(np.dot(best_n, n_gt)), 1.0)))
+        log_print(f"\n--- 正交筛选验证 ---")
+        log_print(f"真实法向量 n_gt: {np.round(n_gt, 4)}")
+        log_print(f"估计法向量 n_est (best_n): {np.round(best_n, 4)}")
+        log_print(f"法向量夹角: {angle:.2f}°")
+        if angle < 10.0:
+            log_print("🎯 正交筛选成功命中真实解！")
+
+    log_print("\n" + "=" * 60)
+    log_print("精度评估结束")
+    log_print("=" * 60)
 
 # ==============================================================================
 # 🚀 最终主流水线引擎
@@ -561,11 +758,8 @@ def integrate_and_solve_metric_pose():
     if not os.path.isabs(cache_file):
         cache_file = os.path.join(os.path.dirname(__file__), cache_file)
 
-    points_cache_file = config['Algorithm']['points_cache_file']
-    if not os.path.isabs(points_cache_file):
-        points_cache_file = os.path.join(os.path.dirname(__file__), points_cache_file)
-
     FOLDER_PATH_1 = config['Sequence1']['image_dir']
+    DEPTH_DIR_1 = config['Sequence1'].get('depth_dir', '')
     TRAJ_PATH_1 = config['Sequence1']['trajectory_path']
     ROI_PATH_1 = config['Sequence1']['roi_path']
 
@@ -578,27 +772,37 @@ def integrate_and_solve_metric_pose():
     slam_poses1 = load_tum_trajectory(TRAJ_PATH_1)
 
     log_print(f">>> 🚀 启动 [物理度量恢复] 跨序列双剑合璧！")
-    log_print(f">>> 逻辑树：GUI选帧 -> Looming去旋测距 -> 画框提取汉字骨架 -> LoFTR特征匹配算H -> 正交筛选 -> 绝对平移")
+    log_print(f">>> 逻辑树：GUI选帧 -> Looming去旋测距 -> 画框提取汉字骨架 -> LoFTR特征匹配算H -> 正交筛选 -> 绝对平移 -> 精度评估")
+    
+    # 🌟 统一缓存（帧号 + 四选点）
+    cache_data = load_cache(cache_file)
     
     # ==== 1. GUI 选帧 ====
     idx1_base, idx2_base = 0, 0 
-    if os.path.exists(cache_file):
-        with open(cache_file, "r") as f:
-            lines = f.read().strip().split()
-            if len(lines) >= 2:
-                idx1_base, idx2_base = int(lines[0]), int(lines[1])
-        log_print(f"\n📁 发现缓存文件，自动加载选帧：Lines1[{idx1_base}] <---> Lines2[{idx2_base}]")
+    if cache_data:
+        pairs = cache_data.get('pairs', {})
+        loaded = False
+        for pair_key, entry in pairs.items():
+            if isinstance(entry, dict) and 'idx1' in entry and 'idx2' in entry:
+                idx1_base = entry['idx1']
+                idx2_base = entry['idx2']
+                loaded = True
+                break
+        if loaded:
+            log_print(f"\n📁 发现统一缓存，自动加载选帧：Lines1[{idx1_base}] <---> Lines2[{idx2_base}]")
+        else:
+            log_print(f"\n⚠️ 缓存文件存在但无可用的帧号记录，启动 GUI 选帧...")
+            idx1_base = select_frame_gui(images1, idx1_base, "Sequence 1 (Lines1)")
+            idx2_base = select_frame_gui(images2, idx2_base, "Sequence 2 (Lines2)")
+            log_print(f"👉 最终选定计算帧：Lines1_img[{idx1_base}] <---> Lines2_img[{idx2_base}]")
     else:
         log_print("\n🔔 [GUI 选帧] 请在窗口中操作...")
         idx1_base = select_frame_gui(images1, idx1_base, "Sequence 1 (Lines1)")
         idx2_base = select_frame_gui(images2, idx2_base, "Sequence 2 (Lines2)")
-        with open(cache_file, "w") as f: f.write(f"{idx1_base}\n{idx2_base}")
         log_print(f"👉 最终选定计算帧：Lines1_img[{idx1_base}] <---> Lines2_img[{idx2_base}]")
-
-    # 🌟 加载四选点缓存
+    
     pair_key = make_pair_key(idx1_base, idx2_base)
-    points_cache = load_points_cache(points_cache_file)
-    cached_data = points_cache.get(pair_key, None)
+    cached_data = cache_data.get('pairs', {}).get(pair_key, None)
 
     # ==== 2. Looming 测距 ====
     log_print("\n👉 检验序列 1 (基准) 的连续测距掩码框...")
@@ -622,7 +826,12 @@ def integrate_and_solve_metric_pose():
     pose1_B = get_closest_pose(time1_B, slam_poses1)
 
     R_12, t_12 = calculate_motion_rt(pose1_A, pose1_B)
-    tx, ty, tz = t_12
+    
+    # 🔧 将位移从远帧坐标系变换到近帧坐标系
+    # t_12 = R_far^T·(t_near-t_far) 是远帧相机系下的位移
+    # center_far 已被 derotate 到近帧朝向，FOE 和 delta_d 也必须在近帧朝向
+    t_near_frame = R_12.T @ t_12
+    tx, ty, tz = t_near_frame
     delta_d = tz
     log_print(f"    [Motion Info] tx: {tx:.4f}, ty: {ty:.4f}, tz(delta_d): {tz:.4f}")
     if delta_d < 0.01: 
@@ -677,15 +886,18 @@ def integrate_and_solve_metric_pose():
         img1_B, img2_base, pts1_roi=roi_target, cached_pts2_roi=cached_loftr_pts2
     )
     
-    # 🌟 保存四选点到缓存
-    new_cache_entry = {
+    # 🌟 保存帧号 + 四选点到统一缓存
+    if 'pairs' not in cache_data:
+        cache_data['pairs'] = {}
+    cache_data['pairs'][pair_key] = {
+        'idx1': idx1_base,
+        'idx2': idx2_base,
         'lines_roi': roi_target.tolist(),
         'loftr_roi2': pts2_roi.tolist(),
         'saved_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     }
-    points_cache[pair_key] = new_cache_entry
-    save_points_cache(points_cache_file, points_cache)
-    log_print(f"💾 四选点已缓存至 {points_cache_file} (键: {pair_key})")
+    save_cache(cache_file, cache_data)
+    log_print(f"💾 统一缓存已保存至 {cache_file} (键: {pair_key})")
     
     if pts1 is None or len(pts1) < 4:
         log_print("❌ LoFTR 有效匹配点不足，程序终止。")
@@ -711,12 +923,16 @@ def integrate_and_solve_metric_pose():
     log_print("="*40)
 
     best_idx, min_error = -1, float('inf')
+    ortho_errors_list = []
+    normals_list = []
 
     for i in range(num_solutions):
         n_cv = normals[i].flatten()
         if n_cv[2] > 0: 
             error = evaluate_orthogonality(h_lines, v_lines, n_cv, K)
             log_print(f"🟢 [候选解 {i+1}] 3D正交误差: {error:.4f}  |  数学解 n_cv: {np.round(n_cv, 4)}")
+            ortho_errors_list.append(error)
+            normals_list.append(n_cv.tolist())
             if error < min_error:
                 min_error = error; best_idx = i
 
@@ -750,8 +966,302 @@ def integrate_and_solve_metric_pose():
     
     log_print("\n🎨 正在启动带有真实纸张物理形变的 3D 窗口...")
     visualize_3d_scene(best_R, t_real, best_n, d, K, roi_target)
+
+    # ==== 7. 精度评估 ====
+    if DEPTH_DIR_1 and os.path.isdir(DEPTH_DIR_1):
+        log_print("\n🔍 深度图目录存在，启动自动精度评估...")
+        evaluate_accuracy(
+            idx1_prev=idx1_prev,
+            idx1_base=idx1_base,
+            idx2_base=idx2_base,
+            Z_looming=Z_looming,
+            dr=dr,
+            delta_d=delta_d,
+            best_R=best_R,
+            t_real=t_real,
+            best_n=best_n,
+            roi_target=roi_target,
+            traj1_path=TRAJ_PATH_1,
+            traj2_path=TRAJ_PATH_2,
+            depth_dir=DEPTH_DIR_1,
+            roi_path_seq1=ROI_PATH_1
+        )
+    else:
+        log_print("\n⚠️  深度图目录未配置或不存在，跳过精度评估。")
+
+    log_print(f"\n✅ [EXPERIMENT COMPLETE] Results saved to {LOG_FILE_PATH}")
+
+def batch_evaluate_looming():
+    """
+    批量安静模式：遍历序列1所有连续帧对，计算 Looming Z 并与深度真值对比。
+    自动从 ROI (x,y,w,h) 提取四个角点，无需手动标注。
+    不弹出任何 GUI 窗口。
+    """
+    log_print("\n\n" + "="*80)
+    log_print(f"🚀 [BATCH EVALUATION START] Time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    log_print("="*80)
     
-    log_print(f"✅ [EXPERIMENT COMPLETE] Results saved to {LOG_FILE_PATH}")
+    FOLDER_PATH_1 = config['Sequence1']['image_dir']
+    DEPTH_DIR_1 = config['Sequence1'].get('depth_dir', '')
+    TRAJ_PATH_1 = config['Sequence1']['trajectory_path']
+    ROI_PATH_1 = config['Sequence1']['roi_path']
+    
+    if not DEPTH_DIR_1 or not os.path.isdir(DEPTH_DIR_1):
+        log_print("❌ 深度图目录未配置或不存在，无法进行批量评估。")
+        return
+    
+    images1 = sorted(glob.glob(os.path.join(FOLDER_PATH_1, "*.png")))
+    if len(images1) < 2:
+        log_print("❌ 图片数量不足")
+        return
+    
+    slam_poses1 = load_tum_trajectory(TRAJ_PATH_1)
+    if len(slam_poses1) < 2:
+        log_print("❌ 轨迹数据不足")
+        return
+    
+    # 先检查 ROI 文件是否已存在
+    if os.path.exists(ROI_PATH_1):
+        log_print(f"✅ 发现已有 ROI 文件 ({ROI_PATH_1})，直接加载")
+        saved_rois1 = load_saved_rois(ROI_PATH_1)
+    else:
+        log_print("⏳ ROI 文件不存在，尝试生成（可能弹出 GUI）...")
+        process_sequence_with_cached_rois(FOLDER_PATH_1)
+        saved_rois1 = load_saved_rois(ROI_PATH_1)
+    
+    if not saved_rois1:
+        log_print("❌ saved_rois 为空，请先运行 process_sequence_with_cached_rois")
+        return
+    
+    log_print(f"\n📊 开始批量评估：共 {len(images1)} 帧，步长 {FRAME_STEP}")
+    log_print(f"{'i_far':>6} {'i_near':>6} {'Z_loom':>10} {'Z_gt':>10} {'Err_abs':>10} {'Err_rel%':>10} {'dr_px':>8} {'status'}")
+    log_print("-" * 95)
+    
+    # 低信噪比过滤阈值
+    # dr < 5px 时公式 Z = r*Δd/dr 对微小检测误差极度敏感，必须过滤
+    DR_THRESHOLD = 5.0      # 近帧与远帧中目标点离 FOE 的最小距离差（像素）
+    MAX_Z_THRESHOLD = 30.0  # 最大合理 Z 值 (m)，超出视为异常
+    MIN_DELTA_D = 0.02      # 最小帧间位移 (m)
+
+    errors_abs = []
+    errors_rel = []
+    errors_abs_unfiltered = []  # 未过滤的所有有效结果
+    errors_rel_unfiltered = []
+    errors_all = []
+    valid_count = 0
+    filtered_count = 0
+    skip_dr = 0
+    skip_roi = 0
+    skip_depth = 0
+    skip_pose = 0
+    skip_other = 0
+    
+    for i_near in range(FRAME_STEP, len(images1)):
+        i_far = i_near - FRAME_STEP
+        
+        if i_near >= len(saved_rois1) or i_far >= len(saved_rois1):
+            skip_roi += 1
+            continue
+        
+        roi_near = saved_rois1[i_near] if i_near < len(saved_rois1) else None
+        roi_far = saved_rois1[i_far] if i_far < len(saved_rois1) else None
+        
+        if roi_near is None or roi_far is None:
+            skip_roi += 1
+            continue
+        
+        try:
+            # 从 ROI (x,y,w,h) 提取四个角点 (tl, tr, br, bl)
+            x_n, y_n, w_n, h_n = roi_near
+            x_f, y_f, w_f, h_f = roi_far
+            
+            img_near = cv2.imread(images1[i_near])
+            img_far = cv2.imread(images1[i_far])
+            if img_near is None or img_far is None:
+                skip_other += 1
+                continue
+            
+            # 提取四条骨架线并计算中心
+            lines_near = extract_four_lines_from_real_image(img_near, roi_near)
+            lines_far = extract_four_lines_from_real_image(img_far, roi_far)
+            
+            if not lines_near or not lines_far:
+                skip_roi += 1
+                continue
+            
+            center_near_P1, _ = calculate_rectangle_center(*lines_near)
+            center_far_raw, corners_far = calculate_rectangle_center(*lines_far)
+            
+            # 获取位姿
+            time_near = float(os.path.basename(images1[i_near]).replace(".png", "")) / 1e9
+            time_far = float(os.path.basename(images1[i_far]).replace(".png", "")) / 1e9
+            
+            pose_near = get_closest_pose(time_near, slam_poses1)
+            pose_far = get_closest_pose(time_far, slam_poses1)
+            
+            if pose_near is None or pose_far is None:
+                skip_pose += 1
+                continue
+            
+            # 运动方向为 far→near (向前，与 integrate_and_solve_metric_pose 一致)
+            R_12, t_12 = calculate_motion_rt(pose_far, pose_near)
+            
+            # 🔧 将位移从远帧坐标系变换到近帧坐标系
+            # t_12 = R_far^T·(t_near-t_far) 是远帧相机系下的位移
+            # center_far 已被 derotate 到近帧朝向，所以 FOE 和 delta_d 也必须在近帧朝向
+            t_near_frame = R_12.T @ t_12
+            delta_d = t_near_frame[2]
+            
+            if abs(delta_d) < 0.01:
+                skip_pose += 1
+                continue
+            
+            FOE = (fx * (t_near_frame[0] / t_near_frame[2]) + cx, fy * (t_near_frame[1] / t_near_frame[2]) + cy)
+            
+            # 去旋：将 far 帧的点旋转到 near 帧坐标系中，消除旋转分量
+            center_far_pure = derotate_point(center_far_raw, R_12.T)
+            
+            # Looming 测距公式
+            Z_result = calculate_pure_looming_Z_v2(center_near_P1, center_far_pure, FOE, delta_d)
+            if Z_result is None or Z_result[0] is None:
+                skip_dr += 1
+                continue
+            
+            Z_looming, r_near, r_far, dr = Z_result
+            
+            # ---- 低信噪比过滤 ----
+            # dr < 阈值时公式 Z = r*Δd/dr 对中心检测误差极度敏感
+            # 例如：物体在4m时Δd=0.13m, r≈100px, 期望dr≈3.15px
+            # 中心提取抖动0.5px就会导致Z从4m跳到5.7m
+            filter_reason = None
+            if dr < DR_THRESHOLD:
+                filter_reason = f"dr={dr:.1f}<{DR_THRESHOLD}"
+            elif abs(delta_d) < MIN_DELTA_D:
+                filter_reason = f"Δd={delta_d:.4f}<{MIN_DELTA_D:.2f}"
+            elif dr > 0 and abs(delta_d / dr) > 1.0:
+                # 等效深度检测：Z_gt = r*Δd/dr, 当 Δd/dr >> 1 意味着估计深度远超合理范围
+                pass  # 宽松条件，不强制过滤
+            
+            if filter_reason:
+                skip_dr += 1
+                continue
+            
+            # 获取 GT 深度
+            center_x, center_y = center_near_P1[0], center_near_P1[1]
+            Z_gt, depth_fname = get_gt_depth(DEPTH_DIR_1, i_near, center_x, center_y)
+            
+            if Z_gt is None or Z_gt <= 0:
+                skip_depth += 1
+                continue
+            
+            err_abs = abs(Z_looming - Z_gt)
+            err_rel = err_abs / Z_gt * 100 if Z_gt > 0 else 0
+            
+            # 记录未过滤的原始误差（用于对比）
+            errors_abs_unfiltered.append(err_abs)
+            errors_rel_unfiltered.append(err_rel)
+            
+            # Z 值合理性检查：结果超出 MAX_Z_THRESHOLD 或为负视为异常
+            if Z_looming > MAX_Z_THRESHOLD or Z_looming <= 0:
+                filtered_count += 1
+                log_print(f"{i_far:>6} {i_near:>6} {Z_looming:>10.3f} {Z_gt:>10.3f} {err_abs:>10.3f} {err_rel:>9.2f} {dr:>8.2f} ⚠ Z异常")
+                continue
+            
+            errors_abs.append(err_abs)
+            errors_rel.append(err_rel)
+            errors_all.append({
+                'i_far': i_far, 'i_near': i_near,
+                'Z_looming': float(Z_looming), 'Z_gt': float(Z_gt),
+                'err_abs': float(err_abs), 'err_rel': float(err_rel),
+                'dr_px': float(dr)
+            })
+            valid_count += 1
+            
+            log_print(f"{i_far:>6} {i_near:>6} {Z_looming:>10.3f} {Z_gt:>10.3f} {err_abs:>10.3f} {err_rel:>9.2f} {dr:>8.2f} ✓")
+            
+        except Exception as e:
+            skip_other += 1
+            log_print(f"{i_far:>6} {i_near:>6} {'--':>10} {'--':>10} {'--':>10} {'--':>10} {'--':>8} ✗ {str(e)[:35]}")
+            continue
+    
+    # 统计汇总
+    total_skip = skip_dr + skip_roi + skip_depth + skip_pose + skip_other
+    log_print("\n" + "="*80)
+    log_print("📊 批量评估统计")
+    log_print("="*80)
+    log_print(f"总帧对数: {len(images1) - FRAME_STEP}")
+    log_print(f"有效帧对数: {valid_count}")
+    log_print(f"跳过帧对数: {total_skip} (dr={skip_dr}, roi={skip_roi}, depth={skip_depth}, pose={skip_pose}, other={skip_other})")
+    
+    if valid_count > 0 and len(errors_abs) > 0:
+        errors_abs_arr = np.array(errors_abs)
+        errors_rel_arr = np.array(errors_rel)
+        
+        mae = np.mean(errors_abs_arr)
+        rmse = np.sqrt(np.mean(errors_abs_arr**2))
+        median_err = np.median(errors_abs_arr)
+        std_err = np.std(errors_abs_arr)
+        mean_rel = np.mean(errors_rel_arr)
+        median_rel = np.median(errors_rel_arr)
+        
+        log_print(f"\n绝对误差 (m):")
+        log_print(f"  MAE:       {mae:.4f}")
+        log_print(f"  RMSE:      {rmse:.4f}")
+        log_print(f"  Median:    {median_err:.4f}")
+        log_print(f"  Std:       {std_err:.4f}")
+        log_print(f"  Min:       {np.min(errors_abs_arr):.4f}")
+        log_print(f"  Max:       {np.max(errors_abs_arr):.4f}")
+        
+        log_print(f"\n相对误差 (%):")
+        log_print(f"  Mean:      {mean_rel:.2f}%")
+        log_print(f"  Median:    {median_rel:.2f}%")
+        
+        within_5cm = int(np.sum(errors_abs_arr < 0.05))
+        within_10cm = int(np.sum(errors_abs_arr < 0.10))
+        within_20cm = int(np.sum(errors_abs_arr < 0.20))
+        log_print(f"\n误差分布:")
+        log_print(f"  < 5cm:     {within_5cm}/{valid_count} ({within_5cm/valid_count*100:.1f}%)")
+        log_print(f"  < 10cm:    {within_10cm}/{valid_count} ({within_10cm/valid_count*100:.1f}%)")
+        log_print(f"  < 20cm:    {within_20cm}/{valid_count} ({within_20cm/valid_count*100:.1f}%)")
+        
+        # 保存详细结果到 JSON
+        results_json = os.path.join(os.path.dirname(__file__), "batch_results.json")
+        with open(results_json, 'w', encoding='utf-8') as f:
+            json.dump({
+                'summary': {
+                    'total_pairs': len(images1) - FRAME_STEP,
+                    'valid_count': valid_count,
+                    'mae_m': float(mae),
+                    'rmse_m': float(rmse),
+                    'median_err_m': float(median_err),
+                    'std_m': float(std_err),
+                    'mean_rel_pct': float(mean_rel),
+                    'median_rel_pct': float(median_rel),
+                    'within_5cm': within_5cm,
+                    'within_10cm': within_10cm,
+                    'within_20cm': within_20cm
+                },
+                'details': errors_all
+            }, f, indent=2, ensure_ascii=False)
+        log_print(f"\n💾 详细结果已保存至: {results_json}")
+    else:
+        log_print("\n⚠️  无有效帧对可用于统计。")
+    
+    log_print(f"\n✅ [BATCH EVALUATION COMPLETE] Results saved to {LOG_FILE_PATH}")
+
 
 if __name__ == "__main__":
-    integrate_and_solve_metric_pose()
+    import argparse
+    parser = argparse.ArgumentParser(description="ORB-SLAM3 Looming Metric Solver")
+    parser.add_argument("-q", "--quiet", action="store_true",
+                        help="安静批量模式：遍历序列1所有连续帧对，计算 Looming Z 与深度真值误差，不弹出 GUI")
+    args = parser.parse_args()
+    
+    if args.quiet:
+        QUIET_MODE = True
+        # 安静模式下跳过所有 matplotlib 和 cv2 窗口
+        import matplotlib
+        matplotlib.use('Agg')  # 非交互式后端
+        batch_evaluate_looming()
+    else:
+        integrate_and_solve_metric_pose()
