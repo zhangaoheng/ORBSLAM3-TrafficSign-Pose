@@ -18,12 +18,12 @@ chmod +x build.sh
 # Python 虚拟环境
 python3 -m venv landmarkslam/yolo_venv
 source landmarkslam/yolo_venv/bin/activate
-pip install -r requirements.txt  # 见下方依赖清单
+pip install opencv-python numpy matplotlib pyyaml torch kornia scipy pyrealsense2
 ```
 
 ### Python 依赖
 
-```
+以下是上述命令安装的包：
 opencv-python
 numpy
 matplotlib
