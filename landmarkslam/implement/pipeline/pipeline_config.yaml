@@ -1,0 +1,93 @@
+# ==============================================================================
+# 🌟 一键流水线配置（pipeline_config.yaml）
+#   将所有路径和参数集中管理，供 run_pipeline.py 使用
+# ==============================================================================
+
+# ====== 项目根路径（所有相对路径均以此为基准） ======
+project_root: /home/zah/ORB_SLAM3-master
+
+# ====== ORB-SLAM3 外部依赖 ======
+orbslam:
+  # rgbd_tum 二进制执行路径（相对 project_root）
+  binary: Examples/RGB-D/rgbd_tum
+  # ORB 词典路径
+  vocabulary: Vocabulary/ORBvoc.txt
+  # ORB-SLAM3 相机 YAML 模板，相机内参将由本配置的 camera 段动态替换
+  config_template: Examples/RGB-D/TUM1.yaml
+
+# ====== 数据路径 ======
+data:
+  # 原始 RealSense D456 .bag 文件
+  bag_file: landmarkslam/implement/data/deepseek/20260426_104450.bag
+  # 数据输出根目录（lines_all/ lines1/ lines2/ 将创建在此目录下）
+  output_root: landmarkslam/implement/data/deepseek
+
+# ====== 序列分割参数 ======
+split:
+  # 自动分割模式：填写帧索引则自动切割，不填或填 -1 则弹出 GUI 手动选择
+  # 索引值从 0 开始，包含起始帧和结束帧
+  # 提示：lines_all 共 895 帧，lines1 约[0:243], lines2 约[260:496]
+  seq1_start: 0
+  seq1_end: 243
+  seq2_start: 260
+  seq2_end: 496
+
+# ====== 相机内参（将写入 ORB-SLAM3 的 YAML 配置） ======
+camera:
+  fx: 426.372
+  fy: 425.671
+  cx: 435.525
+  cy: 244.974
+  # 畸变系数（RealSense D435i/D456 可近似为零）
+  k1: 0.0
+  k2: 0.0
+  p1: 0.0
+  p2: 0.0
+  k3: 0.0
+  # 图像尺寸
+  width: 848
+  height: 480
+  # 帧率
+  fps: 30
+  # RGB 顺序（1=RGB, 0=BGR）
+  rgb_order: 1
+  # 深度图缩放因子（RealSense 默认 1000.0，TUM 数据集 5000.0）
+  depth_map_factor: 1000.0
+  # 远/近深度阈值
+  depth_threshold: 40.0
+
+# ====== ORB 特征参数 ======
+orb:
+  n_features: 1000
+  scale_factor: 1.2
+  n_levels: 8
+  ini_th_fast: 20
+  min_th_fast: 7
+
+# ====== Looming 算法参数 ======
+algorithm:
+  # 帧间步长（跳跃多少帧计算一次 Looming）
+  frame_step: 15
+  # Looming 膨胀量最小阈值（像素），低于此值视为噪声
+  dr_threshold: 5.0
+  # 最大合理深度（米）
+  max_z_threshold: 30.0
+  # 最小帧间前进运动（米）
+  min_delta_d: 0.02
+  # LoFTR 模型: outdoor / indoor
+  loftr_model: outdoor
+  # LoFTR 匹配置信度阈值
+  loftr_conf_thresh: 0.5
+  # RANSAC 重投影误差阈值（像素）
+  ransac_threshold: 3.0
+
+# ====== 流水线运行控制 ======
+pipeline:
+  # 运行模式: batch | interactive | full
+  #   batch       — 批量模式（-q），遍历所有帧对，输出统计/图表，无 GUI
+  #   interactive — 交互模式，启动 GUI 选帧、LoFTR、3D 可视化
+  #   full        — 先执行 batch，再执行 interactive
+  mode: batch
+  # 跳过的阶段列表（阶段编号: 1=Bag提取, 2=ORB-SLAM3, 3=分割, 4=ROI标注, 5=主流水线）
+  # 示例: [1, 2, 3] 表示跳过前三阶段，从 ROI 标注开始
+  skip_stages: []
