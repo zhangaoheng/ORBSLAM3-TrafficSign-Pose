@@ -40,10 +40,7 @@ def log_print(*args, **kwargs):
     msg = " ".join(map(str, args))
     if not QUIET_MODE:
         print(msg, **kwargs)
-    if QUIET_MODE:
-        mode = "a"
-    else:
-        mode = "w" if not _log_file_initialized else "a"
+    mode = "w" if not _log_file_initialized else "a"
     with open(LOG_FILE_PATH, mode, encoding="utf-8") as f:
         f.write(msg + "\n")
     _log_file_initialized = True
@@ -1174,7 +1171,8 @@ def batch_evaluate_looming():
         report_path = _generate_markdown_report(plot_dir, summary, plot_paths, valid_count, total_skip,
                                                  skip_dr, skip_roi, skip_depth, skip_pose, skip_other)
         log_print(f"\n📄 可视化报告已生成: {report_path}")
-        
+        _print_output_summary(LOG_FILE_PATH, results_json, report_path, plot_paths, valid_count)
+
         if was_interactive:
             matplotlib.use('TkAgg')
     else:
@@ -1527,8 +1525,38 @@ def _generate_markdown_report(plot_dir, summary, plot_paths, valid_count, total_
     
     with open(report_path, 'w', encoding='utf-8') as f:
         f.write(md)
-    
+
     return report_path
+
+
+def _print_output_summary(log_path, json_path, report_path, plot_paths, valid_count):
+    """
+    在 -q 模式下用 print() 输出所有生成文件的保存路径清单。
+    不使用 log_print 以确保无论 QUIET_MODE 如何都打印到终端。
+    """
+    print()
+    print("=" * 80)
+    print("  📦 批量评估输出文件汇总")
+    print("=" * 80)
+    print(f"  ✅ 文本日志:      {os.path.abspath(log_path)}")
+    print(f"  ✅ JSON 结果:     {os.path.abspath(json_path)}")
+    print("  📈 图表:")
+    chart_labels = [
+        "[1] 深度对比 (Bland-Altman)",
+        "[2] 误差分布直方图",
+        "[3] 逐帧误差趋势",
+        "[4] 误差 vs 深度",
+        "[5] 平面距离 d 对比",
+        "[6] 膨胀量-误差关联",
+    ]
+    for i, p in enumerate(plot_paths):
+        label = chart_labels[i] if i < len(chart_labels) else f"[{i+1}] (图表)"
+        print(f"     {label}  {os.path.abspath(p)}")
+    print(f"  📄 可视化报告:    {os.path.abspath(report_path)}")
+    print(f"  📊 有效帧对数:    {valid_count}")
+    print("=" * 80)
+    print()
+
 
 # ==============================================================================
 # 🚀 最终主流水线引擎
