@@ -70,7 +70,12 @@ CameraTrajectory.txt
 kf_*.txt
 f_*.txt
 
-# === 6. 临时文件和日志 ===
+# === 6. landmarkslam 运行时生成文件 ===
+landmarkslam/implement/main/batch_results.json
+landmarkslam/implement/main/selected_frames_cache.json
+landmarkslam/implement/main/batch_plots/batch_report.md
+
+# === 7. 临时文件和日志 ===
 *.csv
 *.log
 landmarkslam/implement/data/lines1.bag
