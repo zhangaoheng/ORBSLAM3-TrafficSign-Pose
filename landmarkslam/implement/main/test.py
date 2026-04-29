@@ -72,6 +72,23 @@ K_inv = np.linalg.inv(K)
 FRAME_STEP = config['Algorithm']['frame_step']
 
 # ==============================================================================
+# 🌟 中文字体配置（解决 matplotlib 中文显示方框的问题）
+# ==============================================================================
+import matplotlib
+import matplotlib.font_manager as _fm
+import matplotlib.pyplot as _plt
+_CN_FONT_PATH = os.path.expanduser("~/.fonts/NotoSansSC-Regular.ttf")
+if os.path.exists(_CN_FONT_PATH):
+    try:
+        _fm.fontManager.addfont(_CN_FONT_PATH)
+        _cn_prop = _fm.FontProperties(fname=_CN_FONT_PATH)
+        _cn_font_name = _cn_prop.get_name()
+        _plt.rcParams['font.family'] = _cn_font_name
+        _plt.rcParams['axes.unicode_minus'] = False
+    except Exception:
+        pass
+
+# ==============================================================================
 # 🌟 模块 0：平面参数估计（从角点+深度推算 n 和 d）
 # ==============================================================================
 def estimate_plane_from_corners(corners_2d, Z_center, K_mat):
@@ -490,14 +507,14 @@ def draw_camera(ax, R_local, t, label, scale=0.4, color='black'):
 
 def visualize_dashboard(img1, img2, R_rel, t_real, X_3d, n_cv):
     fig = plt.figure(figsize=(18, 6))
-    fig.canvas.manager.set_window_title("Metric Pose Dashboard")
-    ax1 = fig.add_subplot(1, 3, 1); ax1.imshow(cv2.cvtColor(img1, cv2.COLOR_BGR2RGB)); ax1.set_title("Seq 1"); ax1.axis('off')
-    ax2 = fig.add_subplot(1, 3, 2); ax2.imshow(cv2.cvtColor(img2, cv2.COLOR_BGR2RGB)); ax2.set_title("Seq 2"); ax2.axis('off')
+    fig.canvas.manager.set_window_title("度量位姿面板 (Metric Pose Dashboard)")
+    ax1 = fig.add_subplot(1, 3, 1); ax1.imshow(cv2.cvtColor(img1, cv2.COLOR_BGR2RGB)); ax1.set_title("序列 1"); ax1.axis('off')
+    ax2 = fig.add_subplot(1, 3, 2); ax2.imshow(cv2.cvtColor(img2, cv2.COLOR_BGR2RGB)); ax2.set_title("序列 2"); ax2.axis('off')
     ax3 = fig.add_subplot(1, 3, 3, projection='3d')
     origin1, R1 = np.array([0, 0, 0]), np.eye(3)
-    draw_camera(ax3, R1, origin1, "Cam1 (Ref)", color='black')
+    draw_camera(ax3, R1, origin1, "相机1 (参考)", color='black')
     origin2, R2 = (-R_rel.T @ t_real).flatten(), R_rel.T
-    draw_camera(ax3, R2, origin2, "Cam2", color='dodgerblue')
+    draw_camera(ax3, R2, origin2, "相机2", color='dodgerblue')
     target = X_3d.flatten()
     ax3.scatter(*target, color='orange', s=100, marker='*')
     normal_end = target + n_cv.flatten() * 0.5 
@@ -519,12 +536,12 @@ def visualize_dashboard(img1, img2, R_rel, t_real, X_3d, n_cv):
 def visualize_3d_scene(R, t, n, d, K_local, roi):
     fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111, projection='3d')
-    ax.set_title("SLAM 3D Viewer: Relative Pose & True Planar Target", fontsize=14)
+    ax.set_title("SLAM 3D 视图：相对位姿与平面目标", fontsize=14)
     C1 = np.array([0.0, 0.0, 0.0])
-    ax.scatter(*C1, color='black', s=50, marker='s'); ax.text(*C1, " Cam 1 (Ref)", color='black')
+    ax.scatter(*C1, color='black', s=50, marker='s'); ax.text(*C1, " 相机1 (参考)", color='black')
     R_inv = R.T
     C2 = (-R_inv @ t).flatten()
-    ax.scatter(*C2, color='black', s=50, marker='^'); ax.text(*C2, " Cam 2", color='black')
+    ax.scatter(*C2, color='black', s=50, marker='^'); ax.text(*C2, " 相机2", color='black')
     ax.plot([C1[0], C2[0]], [C1[1], C2[1]], [C1[2], C2[2]], color='gray', linestyle='--')
     
     pts = np.array(roi, dtype="float32")
@@ -989,50 +1006,24 @@ def batch_evaluate_looming():
         mean_rel = np.mean(errors_rel_arr)
         median_rel = np.median(errors_rel_arr)
         
-        log_print(f"\n--- 深度 Z 误差 ---")
-        log_print(f"  MAE:       {mae_z:.4f} m")
-        log_print(f"  RMSE:      {rmse_z:.4f} m")
-        log_print(f"  Median:    {median_z:.4f} m")
-        log_print(f"  Std:       {std_z:.4f} m")
-        log_print(f"  Min/Max:   {np.min(errors_abs_arr):.4f} / {np.max(errors_abs_arr):.4f} m")
-        log_print(f"  Mean Rel:  {mean_rel:.2f}%")
-        log_print(f"  Median Rel:{median_rel:.2f}%")
-        
         within_5cm = int(np.sum(errors_abs_arr < 0.05))
         within_10cm = int(np.sum(errors_abs_arr < 0.10))
         within_20cm = int(np.sum(errors_abs_arr < 0.20))
-        log_print(f"\n深度误差分布:")
-        log_print(f"  < 5cm:     {within_5cm}/{valid_count} ({within_5cm/valid_count*100:.1f}%)")
-        log_print(f"  < 10cm:    {within_10cm}/{valid_count} ({within_10cm/valid_count*100:.1f}%)")
-        log_print(f"  < 20cm:    {within_20cm}/{valid_count} ({within_20cm/valid_count*100:.1f}%)")
         
-        # ---- d 误差统计 ----
-        if len(errors_d) > 0:
-            d_arr = np.array(errors_d)
-            log_print(f"\n--- 平面距离 d 误差 (n={len(errors_d)}) ---")
-            log_print(f"  MAE:       {np.mean(d_arr):.4f} m")
-            log_print(f"  RMSE:      {np.sqrt(np.mean(d_arr**2)):.4f} m")
-            log_print(f"  Median:    {np.median(d_arr):.4f} m")
-            log_print(f"  Min/Max:   {np.min(d_arr):.4f} / {np.max(d_arr):.4f} m")
-        
-        # ---- n 角度误差统计 ----
-        if len(angles_n) > 0:
-            ang_arr = np.array(angles_n)
-            log_print(f"\n--- 法向量 n 角度误差 (n={len(angles_n)}) ---")
-            log_print(f"  Mean:      {np.mean(ang_arr):.2f}°")
-            log_print(f"  Median:    {np.median(ang_arr):.2f}°")
-            log_print(f"  Std:       {np.std(ang_arr):.2f}°")
-            log_print(f"  Min/Max:   {np.min(ang_arr):.2f}° / {np.max(ang_arr):.2f}°")
+        d_arr = np.array(errors_d) if len(errors_d) > 0 else None
+        ang_arr = np.array(angles_n) if len(angles_n) > 0 else None
+        if ang_arr is not None:
             within_5deg = int(np.sum(ang_arr < 5.0))
             within_10deg = int(np.sum(ang_arr < 10.0))
-            log_print(f"  < 5°:      {within_5deg}/{len(angles_n)} ({within_5deg/len(angles_n)*100:.1f}%)")
-            log_print(f"  < 10°:     {within_10deg}/{len(angles_n)} ({within_10deg/len(angles_n)*100:.1f}%)")
+        else:
+            within_5deg = within_10deg = 0
         
-        # ---- n 一致性分析（理想情况下所有帧的 n 应该差不多）----
         n_est_list = []
         for d in errors_all:
             if 'n_est' in d:
                 n_est_list.append(np.array(d['n_est']))
+        nd_arr = None
+        n_mean = None
         if len(n_est_list) > 1:
             n_stack = np.stack(n_est_list)
             n_mean = np.mean(n_stack, axis=0)
@@ -1041,22 +1032,56 @@ def batch_evaluate_looming():
                 cos_a = np.clip(np.abs(np.dot(n_i, n_mean)), 0.0, 1.0)
                 n_deviations.append(float(math.degrees(math.acos(cos_a))))
             nd_arr = np.array(n_deviations)
-            log_print(f"\n--- 法向量 n 一致性（各帧偏离均值角度）---")
-            log_print(f"  n_mean:    [{n_mean[0]:.4f}, {n_mean[1]:.4f}, {n_mean[2]:.4f}]")
-            log_print(f"  Mean 偏离: {np.mean(nd_arr):.2f}°")
-            log_print(f"  Median:    {np.median(nd_arr):.2f}°")
-            log_print(f"  Std:       {np.std(nd_arr):.2f}°")
-            log_print(f"  Max 偏离:  {np.max(nd_arr):.2f}°")
         
-        # ---- 位姿统计 ----
         t_norms_all = [d.get('t_norm', 0) for d in errors_all if 't_norm' in d]
         rot_angles_all = [d.get('rot_deg', 0) for d in errors_all if 'rot_deg' in d]
-        if len(t_norms_all) > 0:
-            t_arr = np.array(t_norms_all)
-            r_arr = np.array(rot_angles_all)
-            log_print(f"\n--- 帧间位姿变换 (n={len(t_arr)}) ---")
-            log_print(f"  |t| Mean/Median/Min/Max: {np.mean(t_arr):.4f} / {np.median(t_arr):.4f} / {np.min(t_arr):.4f} / {np.max(t_arr):.4f} m")
-            log_print(f"  R_angle Mean/Median/Min/Max: {np.mean(r_arr):.2f}° / {np.median(r_arr):.2f}° / {np.min(r_arr):.2f}° / {np.max(r_arr):.2f}°")
+        t_arr = np.array(t_norms_all) if len(t_norms_all) > 0 else None
+        r_arr = np.array(rot_angles_all) if len(t_norms_all) > 0 else None
+        
+        # ---- 紧凑统计表格 ----
+        def _v(value, fmt=".4f", suffix=""):
+            """安全格式化数值"""
+            if value is None: return "N/A"
+            if isinstance(value, float):
+                return f"{value:{fmt}}{suffix}"
+            return str(value)
+        def _cnt_frac(num, denom):
+            return f"{num}/{denom} ({num/denom*100:.1f}%)" if denom > 0 else "N/A"
+        
+        has_d = d_arr is not None
+        has_n = ang_arr is not None
+        has_nc = nd_arr is not None
+        has_pose = t_arr is not None
+        
+        log_print(f"\n┌─────────┬────────────┬────────────┬────────────┬────────────┬────────────┐")
+        log_print(f"│ {'指标':^9s} │ {'MAE':^10s} │ {'RMSE':^10s} │ {'Median':^10s} │ {'Std':^10s} │ {'Min/Max':^10s} │")
+        log_print(f"├─────────┼────────────┼────────────┼────────────┼────────────┼────────────┤")
+        log_print(f"│ {'Z (m)':^9s} │ {_v(mae_z):>10s} │ {_v(rmse_z):>10s} │ {_v(median_z):>10s} │ {_v(std_z):>10s} │ {_v(np.min(errors_abs_arr))}/{_v(np.max(errors_abs_arr),'.3f'):>6s} │")
+        log_print(f"│ {'Zrel(%)':^9s} │ {_v(mean_rel,'.2f'):>10s} │ {'---':>10s} │ {_v(median_rel,'.2f'):>10s} │ {'---':>10s} │ {'---':>10s} │")
+        if has_d:
+            log_print(f"│ {'d (m)':^9s} │ {_v(np.mean(d_arr)):>10s} │ {_v(np.sqrt(np.mean(d_arr**2))):>10s} │ {_v(np.median(d_arr)):>10s} │ {'---':>10s} │ {_v(np.min(d_arr))}/{_v(np.max(d_arr),'.3f'):>6s} │")
+        if has_n:
+            log_print(f"│ {'n (°)':^9s} │ {_v(np.mean(ang_arr),'.2f'):>10s} │ {'---':>10s} │ {_v(np.median(ang_arr),'.2f'):>10s} │ {_v(np.std(ang_arr),'.2f'):>10s} │ {_v(np.min(ang_arr),'.2f')}/{_v(np.max(ang_arr),'.2f'):>6s} │")
+        if has_nc:
+            log_print(f"│ {'nC (°)':^9s} │ {_v(np.mean(nd_arr),'.2f'):>10s} │ {'---':>10s} │ {_v(np.median(nd_arr),'.2f'):>10s} │ {_v(np.std(nd_arr),'.2f'):>10s} │ {'---':>10s} │ {_v(np.max(nd_arr),'.2f'):>10s} │")
+        if has_pose:
+            log_print(f"│ {'|t|(m)':^9s} │ {_v(np.mean(t_arr)):>10s} │ {'---':>10s} │ {_v(np.median(t_arr)):>10s} │ {'---':>10s} │ {_v(np.min(t_arr),'.4f')}/{_v(np.max(t_arr),'.3f'):>6s} │")
+            log_print(f"│ {'R(°)':^9s} │ {_v(np.mean(r_arr),'.2f'):>10s} │ {'---':>10s} │ {_v(np.median(r_arr),'.2f'):>10s} │ {'---':>10s} │ {_v(np.min(r_arr),'.2f')}/{_v(np.max(r_arr),'.2f'):>6s} │")
+        log_print(f"└─────────┴────────────┴────────────┴────────────┴────────────┴────────────┘")
+        
+        log_print(f"\n┌──────────┬──────────────────────────────┐")
+        log_print(f"│ {'阈值':^10s} │ {'深度 Z 误差分布':^30s} │")
+        log_print(f"├──────────┼──────────────────────────────┤")
+        log_print(f"│ {'< 5cm':^10s} │ {_cnt_frac(within_5cm, valid_count):^30s} │")
+        log_print(f"│ {'< 10cm':^10s} │ {_cnt_frac(within_10cm, valid_count):^30s} │")
+        log_print(f"│ {'< 20cm':^10s} │ {_cnt_frac(within_20cm, valid_count):^30s} │")
+        if has_n:
+            log_print(f"│ {'< 5°':^10s} │ n角度: {_cnt_frac(within_5deg, len(angles_n)):^21s} │")
+            log_print(f"│ {'< 10°':^10s} │ n角度: {_cnt_frac(within_10deg, len(angles_n)):^21s} │")
+        log_print(f"└──────────┴──────────────────────────────┘")
+        
+        if has_nc and n_mean is not None:
+            log_print(f"\n   n 均值: [{n_mean[0]:.4f}, {n_mean[1]:.4f}, {n_mean[2]:.4f}]")
         
         # ---- 保存 JSON ----
         results_json = os.path.join(os.path.dirname(__file__), "batch_results.json")
@@ -1106,6 +1131,52 @@ def batch_evaluate_looming():
         with open(results_json, 'w', encoding='utf-8') as f:
             json.dump({'summary': summary, 'details': errors_all}, f, indent=2, ensure_ascii=False)
         log_print(f"\n💾 详细结果已保存至: {results_json}")
+        
+        # ============ 可视化及报告生成 ============
+        plot_dir = os.path.join(os.path.dirname(__file__), "batch_plots")
+        os.makedirs(plot_dir, exist_ok=True)
+        
+        import matplotlib
+        was_interactive = matplotlib.is_interactive()
+        matplotlib.use('Agg')
+        
+        Z_gt_all = [d['Z_gt'] for d in errors_all]
+        Z_loom_all = [d['Z_looming'] for d in errors_all]
+        err_Z_all = [d['err_Z'] for d in errors_all]
+        err_Z_pct_all = [d['err_Z_pct'] for d in errors_all]
+        d_gt_all = [d['d_gt'] for d in errors_all if 'd_gt' in d]
+        d_est_all = [d['d_est'] for d in errors_all if 'd_est' in d]
+        dr_all = [d['dr_px'] for d in errors_all if 'dr_px' in d]
+        i_near_all = [d['i_near'] for d in errors_all]
+        
+        plot_paths = []
+        
+        p1 = _plot_z_comparison(Z_gt_all, Z_loom_all, plot_dir)
+        if p1: plot_paths.append(p1)
+        
+        p2 = _plot_error_histogram(err_Z_all, plot_dir)
+        if p2: plot_paths.append(p2)
+        
+        p3 = _plot_error_timeseries(i_near_all, err_Z_all, err_Z_pct_all, plot_dir)
+        if p3: plot_paths.append(p3)
+        
+        p4 = _plot_error_vs_depth(Z_gt_all, err_Z_pct_all, plot_dir)
+        if p4: plot_paths.append(p4)
+        
+        if len(d_gt_all) > 0 and len(d_est_all) > 0 and len(d_gt_all) == len(d_est_all):
+            p5 = _plot_d_comparison(d_gt_all, d_est_all, plot_dir)
+            if p5: plot_paths.append(p5)
+        
+        if len(dr_all) > 0 and len(err_Z_pct_all) >= len(dr_all):
+            p6 = _plot_dr_vs_error(dr_all, err_Z_pct_all[:len(dr_all)], plot_dir)
+            if p6: plot_paths.append(p6)
+        
+        report_path = _generate_markdown_report(plot_dir, summary, plot_paths, valid_count, total_skip,
+                                                 skip_dr, skip_roi, skip_depth, skip_pose, skip_other)
+        log_print(f"\n📄 可视化报告已生成: {report_path}")
+        
+        if was_interactive:
+            matplotlib.use('TkAgg')
     else:
         log_print("\n⚠️  无有效帧对可用于统计。")
     
@@ -1113,8 +1184,356 @@ def batch_evaluate_looming():
     return valid_count
 
 # ==============================================================================
+# 🌟 可视化辅助函数
+# ==============================================================================
+def _plot_z_comparison(z_gt_list, z_loom_list, plot_dir):
+    """图①：Z 深度对比散点图 (GT vs Looming) + y=x 参考线"""
+    if len(z_gt_list) == 0 or len(z_loom_list) == 0:
+        return None
+    z_gt = np.array(z_gt_list)
+    z_loom = np.array(z_loom_list)
+    valid = (z_gt > 0) & (z_loom > 0)
+    z_gt, z_loom = z_gt[valid], z_loom[valid]
+    if len(z_gt) == 0:
+        return None
+    
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+    fig.canvas.manager.set_window_title("深度评估 (Looming Depth Evaluation)")
+
+    # 左图：散点图 + y=x
+    all_vals = np.concatenate([z_gt, z_loom])
+    min_v, max_v = 1.0, max(all_vals.max(), 5.0)
+    ax1.scatter(z_gt, z_loom, alpha=0.6, s=30, edgecolors='w', linewidth=0.3)
+    ax1.plot([min_v, max_v], [min_v, max_v], 'r--', linewidth=2, label='y = x (理想值)')
+    ax1.set_xlabel('真实深度 Z_gt (m)', fontsize=12)
+    ax1.set_ylabel('Looming 估计深度 Z_looming (m)', fontsize=12)
+    ax1.set_title(f'深度对比 (n={len(z_gt)})', fontsize=13)
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    ax1.set_xlim(min_v, max_v)
+    ax1.set_ylim(min_v, max_v)
+    ax1.set_aspect('equal')
+
+    # 右图：Bland-Altman 风格 (difference vs mean)
+    diff = z_loom - z_gt
+    mean_val = (z_gt + z_loom) / 2
+    ax2.scatter(mean_val, diff, alpha=0.6, s=30, edgecolors='w', linewidth=0.3)
+    ax2.axhline(y=0, color='r', linestyle='--', linewidth=2)
+    ax2.axhline(y=np.mean(diff), color='orange', linestyle='-', linewidth=1.5, label=f'平均差值: {np.mean(diff):.3f}m')
+    ax2.axhline(y=np.mean(diff)+1.96*np.std(diff), color='gray', linestyle=':', linewidth=1)
+    ax2.axhline(y=np.mean(diff)-1.96*np.std(diff), color='gray', linestyle=':', linewidth=1, label='±1.96σ')
+    ax2.set_xlabel('平均深度 (Z_gt+Z_loom)/2 (m)', fontsize=12)
+    ax2.set_ylabel('差值 Z_loom - Z_gt (m)', fontsize=12)
+    ax2.set_title('Bland-Altman 一致性分析', fontsize=13)
+    ax2.legend(fontsize=9)
+    ax2.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    path = os.path.join(plot_dir, "01_depth_comparison.png")
+    fig.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    log_print(f"   📈 [图1] 深度对比 -> {path}")
+    return path
+
+def _plot_error_histogram(err_z_list, plot_dir):
+    """图②：深度误差分布直方图"""
+    if len(err_z_list) == 0:
+        return None
+    err = np.array(err_z_list)
+    
+    fig, ax = plt.subplots(figsize=(10, 5))
+    fig.canvas.manager.set_window_title("误差分布 (Error Distribution)")
+
+    counts, bins, patches = ax.hist(err, bins=25, color='steelblue', edgecolor='white', alpha=0.8, density=True)
+    ax.axvline(x=np.mean(err), color='red', linestyle='--', linewidth=2, label=f'均值: {np.mean(err):.3f}m')
+    ax.axvline(x=np.median(err), color='orange', linestyle='-', linewidth=2, label=f'中位数: {np.mean(err):.3f}m')
+
+    ax.set_xlabel('绝对深度误差 |Z_loom - Z_gt| (m)', fontsize=12)
+    ax.set_ylabel('概率密度', fontsize=12)
+    ax.set_title(f'深度误差分布 (n={len(err)}, σ={np.std(err):.3f}m)', fontsize=13)
+    ax.legend(fontsize=10)
+    ax.grid(True, alpha=0.3, axis='y')
+    
+    rmse = np.sqrt(np.mean(err**2))
+    stats_text = f"平均绝对误差={np.mean(err):.3f}m\n均方根误差={rmse:.3f}m\n中位数={np.median(err):.3f}m\n最大值={np.max(err):.3f}m"
+    ax.text(0.95, 0.95, stats_text, transform=ax.transAxes, fontsize=10,
+            verticalalignment='top', horizontalalignment='right',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+    
+    plt.tight_layout()
+    path = os.path.join(plot_dir, "02_error_histogram.png")
+    fig.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    log_print(f"   📈 [图2] 误差分布 -> {path}")
+    return path
+
+def _plot_error_timeseries(indices, err_z, err_pct, plot_dir):
+    """图③：逐帧误差趋势双 Y 轴折线图"""
+    if len(indices) == 0:
+        return None
+    
+    fig, ax1 = plt.subplots(figsize=(14, 5))
+    fig.canvas.manager.set_window_title("逐帧误差趋势 (Per-frame Error)")
+
+    color1 = 'steelblue'
+    ax1.plot(indices, err_z, '-', color=color1, linewidth=1.5, alpha=0.8, label='绝对误差 (m)')
+    ax1.set_xlabel('帧索引 (i_near)', fontsize=12)
+    ax1.set_ylabel('绝对误差 (m)', color=color1, fontsize=12)
+    ax1.tick_params(axis='y', labelcolor=color1)
+    ax1.grid(True, alpha=0.3)
+    
+    ax2 = ax1.twinx()
+    color2 = 'darkorange'
+    ax2.plot(indices, err_pct, '-', color=color2, linewidth=1.0, alpha=0.6, label='相对误差 (%)')
+    ax2.set_ylabel('相对误差 (%)', color=color2, fontsize=12)
+    ax2.tick_params(axis='y', labelcolor=color2)
+    
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=9)
+    
+    ax1.set_title(f'逐帧深度误差趋势 (n={len(indices)})', fontsize=13)
+    
+    plt.tight_layout()
+    path = os.path.join(plot_dir, "03_error_timeseries.png")
+    fig.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    log_print(f"   📈 [图3] 逐帧误差趋势 -> {path}")
+    return path
+
+def _plot_error_vs_depth(z_gt_list, err_pct_list, plot_dir):
+    """图④：相对误差 vs 深度散点图"""
+    if len(z_gt_list) == 0 or len(err_pct_list) == 0:
+        return None
+    z_gt = np.array(z_gt_list)
+    err_pct = np.array(err_pct_list)
+    valid = (z_gt > 0)
+    z_gt, err_pct = z_gt[valid], err_pct[valid]
+    if len(z_gt) == 0:
+        return None
+    
+    fig, ax = plt.subplots(figsize=(10, 5))
+    fig.canvas.manager.set_window_title("误差 vs 深度 (Error vs Depth)")
+
+    ax.scatter(z_gt, err_pct, alpha=0.6, s=30, edgecolors='w', linewidth=0.3)
+
+    z_bins = np.percentile(z_gt, [0, 25, 50, 75, 100])
+    bin_centers, bin_means, bin_stds = [], [], []
+    for i in range(len(z_bins)-1):
+        mask = (z_gt >= z_bins[i]) & (z_gt < z_bins[i+1])
+        if np.sum(mask) > 1:
+            bin_centers.append(np.mean(z_gt[mask]))
+            bin_means.append(np.mean(err_pct[mask]))
+            bin_stds.append(np.std(err_pct[mask]))
+    if bin_centers:
+        ax.errorbar(bin_centers, bin_means, yerr=bin_stds, fmt='o-', color='red',
+                    linewidth=2, capsize=5, label='均值±标准差 (每四分位)')
+
+    ax.set_xlabel('真实深度 Z_gt (m)', fontsize=12)
+    ax.set_ylabel('相对误差 |Z_loom-Z_gt|/Z_gt (%)', fontsize=12)
+    ax.set_title('相对误差 vs 深度', fontsize=13)
+    ax.legend(fontsize=10)
+    ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    path = os.path.join(plot_dir, "04_error_vs_depth.png")
+    fig.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    log_print(f"   📈 [图4] 误差 vs 深度 -> {path}")
+    return path
+
+def _plot_d_comparison(d_gt_list, d_est_list, plot_dir):
+    """图⑤：平面距离 d 参数对比 (GT vs Estimated)"""
+    if len(d_gt_list) == 0 or len(d_est_list) == 0:
+        return None
+    d_gt = np.array(d_gt_list)
+    d_est = np.array(d_est_list)
+    
+    fig, ax = plt.subplots(figsize=(8, 7))
+    fig.canvas.manager.set_window_title("平面距离 d 对比 (Plane Distance d Comparison)")
+
+    all_vals = np.concatenate([d_gt, d_est])
+    min_v, max_v = 0.0, max(all_vals.max(), 5.0)
+    ax.scatter(d_gt, d_est, alpha=0.6, s=30, edgecolors='w', linewidth=0.3)
+    ax.plot([min_v, max_v], [min_v, max_v], 'r--', linewidth=2, label='y = x (理想值)')
+
+    ax.set_xlabel('真实 d (m)', fontsize=12)
+    ax.set_ylabel('估计 d (m)', fontsize=12)
+    ax.set_title(f'平面距离 d 对比 (n={len(d_gt)})', fontsize=13)
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    ax.set_xlim(min_v, max_v)
+    ax.set_ylim(min_v, max_v)
+    ax.set_aspect('equal')
+
+    d_err = np.abs(d_est - d_gt)
+    stats_text = f"平均绝对误差={np.mean(d_err):.3f}m\n均方根误差={np.sqrt(np.mean(d_err**2)):.3f}m\n中位数={np.median(d_err):.3f}m"
+    ax.text(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=10,
+            verticalalignment='top', horizontalalignment='left',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+    
+    plt.tight_layout()
+    path = os.path.join(plot_dir, "05_d_comparison.png")
+    fig.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    log_print(f"   📈 [图5] d参数对比 -> {path}")
+    return path
+
+def _plot_dr_vs_error(dr_list, err_pct_list, plot_dir):
+    """图⑥：膨胀量-误差关联散点图 + 趋势线"""
+    if len(dr_list) == 0 or len(err_pct_list) == 0:
+        return None
+    dr = np.array(dr_list)
+    err_pct = np.array(err_pct_list)
+    
+    fig, ax = plt.subplots(figsize=(10, 5))
+    fig.canvas.manager.set_window_title("膨胀量 vs 误差 (DR vs Error)")
+
+    ax.scatter(dr, err_pct, alpha=0.6, s=30, edgecolors='w', linewidth=0.3)
+
+    if len(dr) > 2:
+        z = np.polyfit(dr, err_pct, 1)
+        p = np.poly1d(z)
+        x_line = np.linspace(dr.min(), dr.max(), 100)
+        ax.plot(x_line, p(x_line), 'r-', linewidth=2, label=f'趋势线: y={z[0]:.3f}x+{z[1]:.2f}')
+
+    ax.set_xlabel('Looming 膨胀量 dr (像素)', fontsize=12)
+    ax.set_ylabel('相对误差 (%)', fontsize=12)
+    ax.set_title('误差 vs Looming 膨胀量 (dr)', fontsize=13)
+    ax.legend(fontsize=10)
+    ax.grid(True, alpha=0.3)
+
+    rho = np.corrcoef(dr, err_pct)[0, 1] if len(dr) > 1 else 0
+    stats_text = f"相关系数 r={rho:.3f}\n$\\overline{{dr}}$={np.mean(dr):.1f}px\n$\\overline{{err}}$={np.mean(err_pct):.1f}%"
+    ax.text(0.95, 0.95, stats_text, transform=ax.transAxes, fontsize=10,
+            verticalalignment='top', horizontalalignment='right',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+    
+    plt.tight_layout()
+    path = os.path.join(plot_dir, "06_dr_vs_error.png")
+    fig.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    log_print(f"   📈 [图6] 膨胀量-误差关联 -> {path}")
+    return path
+
+def _generate_markdown_report(plot_dir, summary, plot_paths, valid_count, total_skip,
+                               skip_dr, skip_roi, skip_depth, skip_pose, skip_other):
+    """生成 Markdown 格式的批量评估报告"""
+    report_path = os.path.join(plot_dir, "batch_report.md")
+    now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    z_err = summary.get('Z_error', {})
+    d_err = summary.get('d_error', {})
+    n_err = summary.get('n_angle_error', {})
+    n_cons = summary.get('n_consistency', {})
+    pose_stats = summary.get('pose_stats', {})
+    
+    # 相对路径用于 Markdown 图片引用
+    plot_rel = [os.path.basename(p) for p in plot_paths]
+    
+    md = f"""# 📊 Looming 批量评估报告
+
+**生成时间**: {now}  
+**总帧对数**: {summary.get('total_pairs', 'N/A')}  
+**有效帧对数**: {valid_count}  
+**跳过帧对数**: {total_skip} (dr={skip_dr}, roi={skip_roi}, depth={skip_depth}, pose={skip_pose}, other={skip_other})
+
+---
+
+## 1. 深度 Z 误差统计
+
+| 指标 | 数值 |
+|------|------|
+| MAE | {z_err.get('mae_m', 0):.4f} m |
+| RMSE | {z_err.get('rmse_m', 0):.4f} m |
+| Median | {z_err.get('median_m', 0):.4f} m |
+| Std | {z_err.get('std_m', 0):.4f} m |
+| Mean Rel | {z_err.get('mean_rel_pct', 0):.2f}% |
+| Median Rel | {z_err.get('median_rel_pct', 0):.2f}% |
+
+### 误差分布
+| 阈值 | 数量 | 占比 |
+|------|------|------|
+| < 5cm | {z_err.get('within_5cm', 0)} / {valid_count} | {z_err.get('within_5cm', 0)/valid_count*100 if valid_count else 0:.1f}% |
+| < 10cm | {z_err.get('within_10cm', 0)} / {valid_count} | {z_err.get('within_10cm', 0)/valid_count*100 if valid_count else 0:.1f}% |
+| < 20cm | {z_err.get('within_20cm', 0)} / {valid_count} | {z_err.get('within_20cm', 0)/valid_count*100 if valid_count else 0:.1f}% |
+
+"""
+    
+    if d_err:
+        md += f"""## 2. 平面距离 d 误差统计
+
+| 指标 | 数值 |
+|------|------|
+| MAE | {d_err.get('mae_m', 0):.4f} m |
+| RMSE | {d_err.get('rmse_m', 0):.4f} m |
+| Median | {d_err.get('median_m', 0):.4f} m |
+| Min / Max | {d_err.get('min_m', 0):.4f} / {d_err.get('max_m', 0):.4f} m |
+
+"""
+    
+    if n_err:
+        md += f"""## 3. 法向量 n 角度误差统计
+
+| 指标 | 数值 |
+|------|------|
+| Mean | {n_err.get('mean_deg', 0):.2f}° |
+| Median | {n_err.get('median_deg', 0):.2f}° |
+| Std | {n_err.get('std_deg', 0):.2f}° |
+| < 5° | {n_err.get('within_5deg', 0)} ({n_err.get('within_5deg', 0)/n_err.get('within_5deg', 1)*100 if n_err.get('within_5deg', 0) else 0:.1f}%) |
+| < 10° | {n_err.get('within_10deg', 0)} ({n_err.get('within_10deg', 0)/n_err.get('within_10deg', 1)*100 if n_err.get('within_10deg', 0) else 0:.1f}%) |
+
+"""
+    
+    if n_cons:
+        n_mean_arr = n_cons.get('n_mean', [0,0,0])
+        md += f"""## 4. 法向量一致性
+
+| 指标 | 数值 |
+|------|------|
+| n_mean | [{n_mean_arr[0]:.4f}, {n_mean_arr[1]:.4f}, {n_mean_arr[2]:.4f}] |
+| Mean 偏离 | {n_cons.get('mean_deviation_deg', 0):.2f}° |
+| Median 偏离 | {n_cons.get('median_deviation_deg', 0):.2f}° |
+| Max 偏离 | {n_cons.get('max_deviation_deg', 0):.2f}° |
+
+"""
+    
+    if pose_stats:
+        md += f"""## 5. 帧间位姿变换统计
+
+| 指标 | Mean | Median | Min | Max |
+|------|------|--------|-----|-----|
+| \|t\| (m) | {pose_stats.get('t_norm_mean', 0):.4f} | {pose_stats.get('t_norm_median', 0):.4f} | {pose_stats.get('t_norm_min', 0):.4f} | {pose_stats.get('t_norm_max', 0):.4f} |
+| R_angle (°) | {pose_stats.get('rot_deg_mean', 0):.2f} | {pose_stats.get('rot_deg_median', 0):.2f} | {pose_stats.get('rot_deg_min', 0):.2f} | {pose_stats.get('rot_deg_max', 0):.2f} |
+
+"""
+    
+    # 图片部分
+    titles = {
+        "01_depth_comparison.png": "深度对比 (GT vs Looming) + Bland-Altman",
+        "02_error_histogram.png": "深度误差分布直方图",
+        "03_error_timeseries.png": "逐帧误差趋势",
+        "04_error_vs_depth.png": "相对误差 vs 深度",
+        "05_d_comparison.png": "平面距离 d 对比",
+        "06_dr_vs_error.png": "膨胀量-误差关联",
+    }
+    
+    md += "## 6. 可视化图表\n\n"
+    for pf in plot_rel:
+        title = titles.get(pf, pf)
+        md += f"### {title}\n![{title}]({pf})\n\n"
+    
+    md += "---\n*报告由 batch_evaluate_looming() 自动生成*\n"
+    
+    with open(report_path, 'w', encoding='utf-8') as f:
+        f.write(md)
+    
+    return report_path
+
+# ==============================================================================
 # 🚀 最终主流水线引擎
 # ==============================================================================
+
 def integrate_and_solve_metric_pose():
     log_print("\n\n" + "="*80)
     log_print(f"🚀 [EXPERIMENT START] Time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
