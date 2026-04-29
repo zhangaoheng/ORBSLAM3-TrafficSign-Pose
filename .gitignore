@@ -85,3 +85,9 @@ landmarkslam/implement/data/deepseek/20260425_151937.bag
 landmarkslam/implement/data/deepseek/lines1/camera_intrinsics.json
 landmarkslam/implement/data/deepseek/lines2/camera_intrinsics.json
 landmarkslam/implement/data/deepseek/20260426_104450.bag
+
+# ==== deepseek 数据（由 setup_data.sh 或 pipeline 生成）====
+landmarkslam/implement/data/deepseek/lines_all/camera_intrinsics.json
+landmarkslam/implement/data/deepseek/lines_all/AllFrames_trajectory.txt
+landmarkslam/implement/data/deepseek/lines_all/KeyFrames_trajectory.txt
+landmarkslam/implement/data/deepseek/lines_all/imu.txt
