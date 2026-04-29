@@ -1,0 +1,696 @@
+% This is samplepaper. tex, a sample chapter demonstrating the
+% LLNCS macro package for Springer Computer Science proceedings;
+% Version 2.21 of 2022/01/12
+%
+\documentclass[runningheads]{llncs}
+%
+\usepackage[T1]{fontenc}
+% T1 fonts will be used to generate the final print and online PDFs, 
+% so please use T1 fonts in your manuscript whenever possible. 
+% Other font encondings may result in incorrect characters. 
+%
+\usepackage{graphicx}
+% Used for displaying a sample figure. If possible, figure files should
+% be included in EPS format. 
+%
+% If you use the hyperref package, please uncomment the following two lines
+% to display URLs in blue roman font according to Springer's eBook style:
+%\usepackage{color}
+%\renewcommand\UrlFont{\color{blue}\rmfamily}
+%\urlstyle{rm}
+%
+% \documentclass{article}  
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{amsmath} % 用于数学符号
+\usepackage{subcaption}
+\usepackage{booktabs}
+\usepackage[colorlinks, linkcolor=red, anchorcolor=blue, citecolor=blue]{hyperref}
+
+\setcounter{secnumdepth}{3}   % 允许编号到 subsubsection
+\setcounter{tocdepth}{3}      % 目录也显示到 subsubsection
+
+\renewcommand{\textfraction}{0.05}
+\renewcommand{\floatpagefraction}{0.8}
+
+\makeatletter
+\def\subsubsection{\@startsection{subsubsection}{3}{\z@}%
+  {0.5\baselineskip}{0.2\baselineskip}{\normalfont\normalsize\bfseries}}
+\makeatother
+
+
+\begin{document}
+%
+\title{An End-to-end Approach for Chessboard Corner Detection and Subpixel Estimation}%
+% \thanks{Corresponding author: Wenzhong Wang, Email: \email{wenzhong@ahu.edu.cn}}}
+
+\titlerunning{Chessboard Corner Detection and Subpixel Estimation}
+
+
+
+
+
+\author{
+Jian Xie \inst{1} \and 
+% Wenzhong Wang \inst{1}  
+Wenzhong Wang\inst{1}\thanks{Corresponding author: Wenzhong Wang, Email: \email{wenzhong@ahu.edu.cn}}
+% Jin Tang \inst{1}
+% Xiao Wang \inst{1} 
+}      
+
+% \authorrunning{Jian Xie et al. }
+
+\institute{
+1.School of Computer Science and Technology, Anhui University, Hefei, China
+}
+
+%
+%\titlerunning{Abbreviated paper title}
+% If the paper title is too long for the running head, you can set
+% an abbreviated paper title here
+%
+% \author{First Author\inst{1}\orcidID{0000-1111-2222-3333} \and
+% Second Author\inst{2, 3}\orcidID{1111-2222-3333-4444} \and
+% Third Author\inst{3}\orcidID{2222--3333-4444-5555}}
+% %
+% \authorrunning{F. Author et al. }
+% % First names are abbreviated in the running head. 
+% % If there are more than two authors, 'et al. ' is used. 
+% %
+% \institute{Princeton University, Princeton NJ 08544, USA \and
+% Springer Heidelberg, Tiergartenstr. 17, 69121 Heidelberg, Germany
+% \email{lncs@springer. com}\\
+% \url{http://www. springer. com/gp/computer-science/lncs} \and
+% ABC Institute, Rupert-Karls-University Heidelberg, Heidelberg, Germany\\
+% \email{\{abc, lncs\}@uni-heidelberg. de}}
+
+
+
+
+\maketitle              % typeset the header of the contribution
+%
+\begin{abstract}
+Accurate detection of chessboard corners is essential for camera calibration and industrial measurement. Traditional geometry-based methods often fail in complex scenarios, and generic deep learning detectors also struggle to maintain reliable corner localization under challenging conditions. We propose a neural network tailored for robust and precise corner detection under challenging conditions, including multi-chessboard scenes with varying scales and orientations. The task is formulated as joint board instance segmentation and corner detection. Our model adopts an encoder--dual-decoder architecture: a shared encoder extracts multi-scale image features, while two parallel decoders respectively predict the board confidence map for instance segmentation and background suppression, and the corner confidence map for initial corner localization. The board confidence map also enables reliable separation and localization of different chessboards within the same image, making the method well-suited for multi-chessboard detection. To overcome the precision limits of heatmap quantization, we introduce a sub-pixel refinement head that regresses fine-grained offsets for each detected corner, achieving sub-pixel accuracy.Experimental results on datasets with low illumination, occlusion, degraded textures, and multi-chessboard configurations demonstrate that our method outperforms state-of-the-art approaches in both detection accuracy and topology integrity.
+
+\keywords{Chessboard Corner Detection  
+\and Sub-pixel Localization  
+\and U-Net}
+\end{abstract}
+
+% The model employs an improved U-Net backbone with spatial–channel coordinated attention, multiscale contextual attention, and geometry-constrained modules to enhance feature representation. A local feature enhancement module captures fine corner details while suppressing background noise. An uncertainty-weighted multitask framework jointly optimizes chessboard segmentation and corner localization with adaptive loss balancing. 
+% Postprocessing with semantic masking and instance-level separation enables reliable multi-chessboard detection, followed by non-maximum suppression to generate pixel-level coordinates, refined by a sub-pixel module for high-precision offsets. 
+
+
+\section{Introduction}
+
+
+Chessboard corner detection is crucial for camera calibration, robotic navigation, and geometric alignment. Achieving industrial-level precision requires recovering all corners under complex imaging conditions and localizing them at sub-pixel accuracy. In practical scenes, multiple chessboards may appear at different scales, orientations, and occlusion levels, demanding algorithms that both detect corners reliably and associate them with their respective boards. Real-world images suffer from illumination variations, reflections, blur, distortion, and clutter, making corner identification highly ambiguous. Traditional handcrafted methods are sensitive to noise and contrast, struggle with instance separation, and lack sub-pixel localization, often producing large calibration errors.
+
+In this work, we propose a learning-based approach to achieve robust corner detection for both single- and multi-chessboard scenarios. We formulate multi-chessboard corner detection as a simultaneous board segmentation and corner detection task, and propose to train a deep convolutional neural network for this task. The proposed deep CNN is an encoder-decoder architecture, which comprises of an encoder, two decoders, and a sub-pixel refinement head. The dual decoders are used to predict two confidence maps, one for boards and one for corners. Individual boards are segmented from the board confidence, and the board masks are used to effectively suppress background noise. The raw corners are extracted from the suppressed corner confidence map. The  sub-pixel refinement head regresses a sub-pixel offsets $(\Delta x, \Delta y)$ for each raw corner, thereby mitigating errors caused by heatmap quantization and noise fluctuations. We conduct training and evaluation on a dataset encompassing diverse lighting conditions, occlusions, and multi-chessboard configurations, equipped with precise sub-pixel ground-truth annotations. The overall detection workflow is illustrated in Fig.~\ref{fig:example}.
+
+
+
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.8\textwidth]{images/3.png}
+\caption{Proposed end-to-end framework architecture: Dual-head network generates corner and semantic heatmaps, with patch-based sub-pixel offset regression for enhanced corner precision and structural completeness.}
+\label{fig:example}
+\end{figure}
+
+
+In summary, the main contributions of this work are:
+\begin{enumerate}
+\item A method combining semantic-guided detection and patch-based sub-pixel refinement, enabling accurate single- and multi-chessboard corner detection under complex conditions.
+\item A semantic heatmap design that improves structural completeness and separates multiple chessboard instances.
+\item A lightweight refinement network that delivers stable sub-pixel localization beyond heatmap resolution limits.
+\item A new dataset with diverse scenarios and precise sub-pixel annotations for robust training and benchmarking.
+\end{enumerate}
+
+
+\section{Related Work}
+
+Checkerboard corner detection methods can generally be divided into two categories: detection of checkerboard corners and sub-pixel corner refinement.
+
+\subsection{Detection of Checkerboard Corners}
+Early approaches often relied on general detectors, such as the Harris detector~\cite{Harris1988}, combined with line fitting to extract candidate corners~\cite{Haralick1992,Kanade1974,Wang2002}. These methods perform well on images with minimal distortion but tend to fail under severe distortion or extreme viewpoints. Gradient sign-change detection~\cite{Lucchese2001} alleviates some of these issues, but its effectiveness diminishes in cluttered environments. An improved Harris detector based on color constancy~\cite{VanDeWeijer2006} achieves more stable results under complex illumination, while a hyperbolic tangent model enables sub-pixel localization and reduces false positives. Nonetheless, these approaches remain sensitive to distortion and pose variations.
+
+Specialized detectors leverage checkerboard geometry through diverse techniques. The OpenCV implementation~\cite{opencv_checkerboard} groups detected black quadrilaterals into a complete board and derives corners from edge intersections, yielding reliable results with thick borders and simple backgrounds. The OCamcalib Toolbox~\cite{ocamcalib2006} extends this to address pronounced lens distortion. ChESS~\cite{bennett2014chess} applies circular sampling with simple arithmetic for high efficiency, but is prone to spurious background responses and requires image-specific thresholding; its successor incorporates machine learning to reduce false positives. Saddle-point approaches, such as the Hessian detector~\cite{hessian1999} and ROCHADE, offer efficiency yet suffer reduced robustness. ROCHADE constructs a binary edge graph to extract saddle points, performing well under low resolution and extreme poses, but declining with substantial distortion or uneven illumination.
+
+Template matching is also employed. Geiger et al.~\cite{geiger2012automatic} combined prototype matching with region growing to detect checkerboard patterns. These methods typically degrade under strong rotation or distortion.
+
+With the rise of deep learning, several neural network-based approaches for checkerboard corner detection have been explored. MATE~\cite{MATE2016}, for instance, employs a shallow three-layer convolutional network to extract intrinsic features. While it demonstrates some improvements, the method generates many false positives on medium- and high-resolution images, likely due to the limited representational capacity of the model and the absence of effective post-processing steps.
+
+Our method differs from prior approaches in two key aspects.First, we augment corner detection with a semantic heatmap prediction, which provides explicit global context to suppress background clutter and recover occluded or low-contrast corners — a capability generally absent in traditional and existing learning-based methods. Second, by introducing a dedicated sub-pixel refinement stage, we overcome the quantization limits of heatmap outputs and attain robust localization under noise, distortion, and extreme viewpoints, where conventional refinement operators often fail.
+
+\subsection{Sub-pixel Corner Refinement}
+After initial detection, corner positions often require refinement. Existing methods fall into two categories.
+
+The first relies on pixel intensity. Edge approximation, as in OpenCV, uses gradient filters for efficiency but loses accuracy in noisy conditions. Surface fitting, as in ROCHADE, fits a polynomial over the local neighborhood and extracts the saddle point, with Hessian-based variants improving speed. These methods can be accurate but remain sensitive to noise and rotation.
+
+The second applies sub-pixel peak detection to response maps~\cite{Duda2018}, locating local maxima from detector outputs. They are typically faster but depend heavily on the quality of initial detections.
+
+The proposed approach directly regresses sub-pixel offsets from localized image patches, mitigating noise- and blur-induced instability and generalizing to severe distortion, occlusion, and complex industrial scenes better than gradient- or surface-fitting methods.
+
+
+
+\section{Method}
+
+The proposed chessboard corner detection network targets high-precision localization in complex industrial and outdoor scenes with multiple chessboards. It takes a single-channel grayscale image as input and employs a modified U-Net~\cite{Ronneberger2015} encoder–decoder, optimized for chessboard patterns and multi-scale corner detection. Through multi-scale feature fusion, the network maintains spatial resolution while suppressing background noise. The pipeline includes chessboard mask generation, corner response estimation, and subpixel refinement, as illustrated in Fig.~\ref{fig:network_structure1} and Fig.~\ref{fig:network_structure2}.
+
+
+In the decoding stage, a dual-output structure is employed. 
+The chessboard mask branch localizes chessboard regions, while the corner response branch 
+generates pixel-level confidence maps for potential corners within these areas. 
+The mask constrains background noise, and the response map refines corner localization, 
+ensuring robust detection under multiple chessboards and complex scenes. 
+
+After pixel-level coordinates are obtained, a subpixel refinement module predicts 
+an offset $(\Delta x, \Delta y)$ using mid-level encoder features with high spatial and semantic 
+detail. This offset adjusts corner positions to subpixel accuracy. 
+The final output thus includes the chessboard mask and subpixel-accurate corner coordinates, enabling direct use in industrial measurement, vision calibration, and precise localization.
+
+
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.8\textwidth]{images/2.png}
+    \caption{The architecture of the proposed network model.}
+    \label{fig:network_structure1}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \vspace{-2mm}
+    \includegraphics[scale=0.3]{images/4.png}
+    \vspace{-2mm}
+    \caption{Subpixel Refinement Module.}
+    \label{fig:network_structure2}
+\end{figure}
+
+
+
+\subsection{Network Architecture}
+
+\noindent\textbf{Encoder}  
+To meet the precision requirements of corner detection, the backbone network is carefully optimized. First, standard max-pooling layers in the encoder are replaced with strided convolutions to minimize loss of spatial detail. Second, stacks of small convolution kernels (\(3\times3\)) are used instead of larger kernels, increasing the effective receptive field while enhancing feature representation capacity. Third, \(1\times1\) convolutions are introduced in multi-scale fusion to compress channels and facilitate cross-channel interaction, balancing computational efficiency and feature richness.
+
+These adjustments enable the network to capture fine geometric structures of corners while maintaining real-time operation, making it well-suited to industrial vision systems.  
+
+\begin{equation}
+F = \mathrm{Enc}(X)
+\end{equation}
+where \(X\) denotes the input image, and \(F_{\text{enc}}\) represents the features extracted by the encoder.  
+
+The overall encoder architecture is illustrated in Fig.~\ref{fig:network_structure1}.
+
+\noindent\textbf{Mask Decoder}  
+The mask decoder is designed to generate a chessboard region mask that serves as a spatial prior for subsequent corner localization.  
+Given the encoded features \(F\) from the encoder, the mask decoder outputs a binary mask \(M\) through:
+\begin{equation}
+M = \mathrm{Dec}_M(F)
+\end{equation}
+where \(\mathrm{Dec}_M(\cdot)\) denotes the decoding process, and \(M\) represents the predicted mask image corresponding to the chessboard regions.
+
+By isolating connected components within \(M\), multiple chessboard instances can be efficiently separated, reducing detection errors in subsequent steps.  
+During decoding, low-level spatial details are fused with high-level semantic features, ensuring that the segmentation results preserve fine-grained edge information while maintaining region completeness and boundary precision.The structure of the mask decoder is shown in Fig.~\ref{fig:network_structure1}
+
+
+\noindent\textbf{Corner Decoder}  
+The corner decoder is designed to generate an initial confidence map of chessboard corners, providing pixel-wise corner likelihoods for subsequent precise localization.  
+Given the encoded features \(F\), the corner decoder produces a corner response map \(R\) through:
+\begin{equation}
+R = \mathrm{Dec}_C(F)
+\end{equation}
+where \(\mathrm{Dec}_C(\cdot)\) denotes the decoding process and \(R\) is the predicted grayscale response map (\(0 \leq R(x,y) \leq 1\)), where each pixel value indicates the confidence of being a chessboard corner.
+
+This design enables the network to emphasize corner-relevant features while suppressing background noise, forming a reliable foundation for subsequent sub-pixel corner refinement.  
+The overall structure of the corner decoder is illustrated in Fig.~\ref{fig:network_structure1}.
+
+
+\noindent\textbf{Subpixel Refinement Module}  
+The subpixel refinement module is designed to predict coordinate offsets for each detected chessboard corner, thereby achieving subpixel-level localization accuracy.
+
+First, to eliminate background interference outside valid chessboard regions, the corner response map \(R\) is pointwise-multiplied by the chessboard mask \(M\). Non-maximum suppression (NMS) is then applied to the masked response, yielding the discrete set of pixel-level corner coordinates:
+\begin{equation}
+\mathbf{Y} = \mathrm{NMS}(M \cdot R)
+\end{equation}
+where $\mathbf{Y} = \{(x_i, y_i)\}$ denotes the centroid positions of detected corners. 
+Here, the operator ``$\cdot$'' denotes element-wise multiplication between $M$ and $R$.
+
+Next, for each candidate corner in \(\mathbf{Y}\), the subpixel refinement module takes as input the feature map \(F_3\) from the third decoder layer, which preserves sufficient spatial detail and semantic context for refinement, and output the sub-pixel offset for each corner.
+
+The refinement process is expressed as:
+\begin{equation}
+\mathbf{\Delta} = \Phi(F_3, \mathbf{Y})
+\end{equation}
+where \(\Phi(\cdot)\) denotes the offset prediction function, and $\Delta=\left\{(\Delta x_{i},\Delta y_{i})\right\}$. The raw corners are then refined to sub-pixel accuracy, yielding fine corner coordinates \(\mathbf{\hat{Y}} = \{(x_i+\Delta x_{i}, y_i + \Delta y_{i})\}\).
+
+In practice, a local feature patch (of size $3 \times 3$) centered at each $(x_i, y_i)$ is extracted from $F_3$. 
+This patch is processed by two successive $3 \times 3$ convolutions with ReLU activation to encode local structural characteristics. 
+The resulting features are mapped into the offset space via a $1 \times 1$ convolution, followed by global average pooling to produce the predicted offsets $(\Delta x_i, \Delta y_i)$.
+The overall structure of the subpixel refinement module is illustrated in Fig.~\ref{fig:network_structure2}.
+
+% Next, for each candidate corner in \(\mathbf{y}'\), the subpixel refinement module takes as input the feature map \(F_2\) from the second decoder layer, which preserves sufficient spatial detail and semantic context for refinement.  
+% We examined feature maps from different decoder layers (\(F_1\), \(F_2\), \(F_3\)) and found that \(F_2\) provides the most suitable representation for subpixel offset prediction, offering a good trade-off between fine-grained localization precision and robustness to image noise.  
+% Therefore, \(F_2\) is selected as the input for the refinement stage.
+
+
+% The refinement process is expressed as:
+% \begin{equation}
+% \mathbf{Y} = \varphi(F_2, \mathbf{y}')
+% \end{equation}
+% where \(\varphi(\cdot)\) denotes the offset prediction function that outputs refined coordinates \(\mathbf{Y} = \{(x'_i, y'_i)\}\).
+
+% In practice, a local feature patch centered at each \((x_i, y_i)\) is extracted from \(F_2\). This patch is processed by two successive \(3\times3\) convolutions with ReLU activation to encode local structural characteristics. The resulting features are mapped into the offset space via a \(1\times1\) convolution, followed by global average pooling to produce the predicted offsets \((\Delta x, \Delta y)\). 
+
+
+\noindent\textbf{Inference Pipeline}
+During inference, the network predicts a chessboard region mask and a corner response map, where the mask suppresses background noise and provides valid corner candidates to be refined by the subpixel module for high-precision localization. For multi-chessboard scenes, each mask is processed independently to ensure proper instance separation. The final output consists of binary masks and subpixel-accurate corner coordinates, enabling precise measurement, calibration, and flexible adaptation to diverse applications.
+
+
+
+\subsection{Dataset}
+
+To ensure robustness across diverse degradation scenarios, we constructed a large-scale dataset from two sources: directly captured chessboard sequences and digitally augmented variants. Ten distinct patterns, differing in size and X-corner count, were recorded under cluttered backgrounds and non-uniform illumination. The captured images featured minimal distortion and controlled noise, while challenging conditions were synthetically generated by introducing radial and tangential distortions, Gaussian noise, and blur, following the protocol in MATE. All images were converted to grayscale and optionally resized to VGA resolution ($1280\times1280$). A random subset of 3{,}000 images was used for training, with the remainder reserved for validation.
+
+
+To obtain subpixel-level chessboard corner labels, low-noise chessboard images from various scenes are first collected. The corner candidates are extracted using OpenCV’s \textit{findChessboardCorners} function, but we found their precision is limited. Therefore, we use Bouguet’s algorithm~\cite{bouguet2012camera} to perform subpixel refinement on these candidates, and the resulting corner information is used as the ground-truth annotation. This algorithm achieves high accuracy under low-noise conditions; however, when significant interference occurs, the localization of corners becomes unstable and may lead to errors.
+
+
+
+\subsection{Loss Function}
+The extreme imbalance between corner and non-corner pixels presents a major challenge for effective pixel-wise corner classification. In high-resolution images, the number of true corners is negligible compared with the total number of pixels, leading to an imbalance ratio far greater than those typically encountered in general object detection tasks. A straightforward mean loss over all pixels tends to bias the network toward predicting only non-corner pixels, whereas even a single missed or false detection can substantially impair checkerboard reconstruction.
+
+To address this issue, we employ a multi-component loss function that integrates pixel-wise corner classification, checkerboard region segmentation, and sub-pixel regression, with its design matching our implementation exactly. For corner classification within the heatmap branch, we combine focal loss to alleviate class imbalance and Tversky loss to adaptively penalize misclassification. 
+
+The focal loss with adaptive weighting is defined as
+\begin{equation}
+    \mathcal{L}_{\text{focal}} = 
+    -\alpha_1 \,(1 - p_t)^{\gamma} \,\log(p_t)
+\end{equation}
+where 
+\begin{equation}
+    p_t = G_{ij} \, R_{ij} + \left( 1 - G_{ij} \right) \left( 1 - R_{ij} \right)
+\end{equation}
+Here, $R_{ij} \in [0,1]$ denotes the predicted confidence score at pixel $(i,j)$ , and $G_{ij} \in \{0,1\}$ represents the corresponding ground-truth label.
+The parameter $\alpha_1$ controls the balance between positive and negative samples,
+and $\gamma$ gradually increases to focus learning on hard examples with lower $p_t$.
+
+
+
+The Tversky loss~\cite{salehi2017tversky} is expressed as
+\begin{equation}
+    \mathcal{L}_{\text{Tversky}} = 
+    1 - \frac{\mathrm{TP} + s}
+             {\mathrm{TP} + \alpha_2 \cdot \mathrm{FP} + 
+              \beta \cdot \mathrm{FN} + s}
+\end{equation}
+where \( s \) is a small constant added to avoid division by zero and improve numerical stability.
+True Positives (TP) measure the overlap between the predicted region \( R_{ij} \) and the ground truth \( G_{ij} \);
+False Positives (FP) correspond to regions predicted by \( R_{ij} \) but not present in \( G_{ij} \);
+and False Negatives (FN) correspond to ground-truth regions \( G_{ij} \) that are missed by the prediction \( R_{ij} \).
+The parameters \( \alpha_2 \) and \( \beta \) control the relative weighting between FP and FN, respectively.
+
+
+The combined corner heatmap loss is
+\begin{equation}
+    \mathcal{L}_1 = \omega_{1} \, \mathcal{L}_{\text{Tversky}} 
+                  + \omega_{2} \, \mathcal{L}_{\text{focal}}
+\end{equation}
+
+\noindent
+In our experiments, we set $\omega_{1} = 0.7$ and $\omega_{2} = 0.3$.
+
+
+
+For the Mask Decoder, we employ a combination of binary cross-entropy and Dice losses.
+Let \( M_{ij} \in [0,1] \) be the predicted probability of the board mask at pixel \((i,j)\),
+and \( G^{M}_{ij} \in \{0,1\} \) the corresponding ground-truth mask value.
+
+The board region loss is defined as
+\begin{equation}
+    \mathcal{L}_2 = \lambda \, \mathcal{L}_{\text{BCE}} (M, G^{M}) 
+    + (1 - \lambda) \, \mathcal{L}_{\text{Dice}} (M, G^{M})
+\end{equation}
+with \(\lambda = 0.5\).
+
+
+For regression of sub-pixel corner coordinates, we employ a keypoint coordinate regression loss based on nearest-neighbor matching. Specifically, each corner $(x_i, y_i)$ is assigned to its nearest ground-truth counterpart $(\hat{x}_i, \hat{y}_i)$ in Euclidean space, and the regression error is computed using the L1 distance:
+\begin{equation}
+    \mathcal{L}_3 = \frac{1}{N} \sum_{i=1}^N \left\{\left\lVert x_i + \Delta x_i - \hat{x}_i \right\rVert_1+\left\lVert y_i + \Delta y_i  - \hat{y}_i \right\rVert_1\right\}
+\end{equation}
+where $N$ denotes the number of matched keypoints.
+
+
+Finally, the overall loss function is defined as heatmap loss, board loss, and the keypoint coordinate regression loss based on nearest-neighbor matching:
+\begin{equation}
+    \mathcal{L}_{\text{total}} = \lambda_a \, \mathcal{L}_{1} + \lambda_b \, \mathcal{L}_2 + \lambda_c \, \mathcal{L}_3
+\end{equation}
+
+\noindent
+In this formulation, $\mathcal{L}_1$ represents the corner heatmap loss (Tversky + Focal), $\mathcal{L}_2$ corresponds to the board region loss (BCE + Dice), and $\mathcal{L}_3$ denotes the nearest-neighbor regression loss for keypoint coordinates. 
+The loss weights $\lambda_a$, $\lambda_b$, and $\lambda_c$ are tunable hyperparameters, set to $\lambda_a = 0.3$, $\lambda_b = 0.1$, and $\lambda_c = 0.6$ in our experiments.
+
+
+
+
+
+
+\section{Experiments} 
+
+\subsection{Setting}  
+The network is trained with back-propagation and an Adam optimizer with weight decay. In our experiments, we set the learning rate to $5 \times 10^{-5}$ and use a weight decay of $1 \times 10^{-5}$. Additionally, a ReduceLROnPlateau learning rate scheduler is employed, with a patience of 10 epochs and a decay factor of $0.5$.The batch size is set to 2 images due to memory constraints associated with high-resolution images, and training is performed for a total of 200 epochs. To initialize the network, we employ the Xavier weight initialization method, ensuring robust convergence. Biases are initialized with the constant $0.1$.
+
+To evaluate the network during training, we use a validation set split from the training data. The validation loss is monitored, and the model checkpoint with the lowest validation loss is saved. This ensures that the final model generalizes well to unseen data.
+
+\subsection{Performance Evaluation}
+
+We conducted a precision benchmark comparing our corner detection method with Zhang’s calibration~\cite{zhang2002flexible} and three recent algorithms~\cite{ma2008robust,geiger2012automatic,wu2020checkerboard}, as well as a baseline version of our model without the Subpixel Refinement Module. All methods were evaluated on stitched checkerboard images after preprocessing. Ground truth coordinates were manually annotated by marking rectangular regions at each corner and extracting centroid positions. Precision was measured as the mean Euclidean distance between predicted and annotated coordinates.
+
+Additionally, to evaluate the sub-pixel precision of each algorithm, we generated synthetic checkerboard samples using the Unity engine. This simulation allowed us to obtain exact corner pixel coordinates for benchmarking. The corner detection precision on these synthetic samples was then assessed, ensuring an accurate evaluation beyond real-world annotated data.
+
+Results (Fig.~\ref{fig:comparison}, Table~\ref{tab:comparison}) show that Zhang’s method~\cite{zhang2002flexible} achieved 96.97\% accuracy with negligible false detections under normal conditions, but in noisy scenes missed 8.76\% of corners and had $1.10$~pixel error, and under occlusion its success rate fell below 38\% without geometric completion (Fig.~\ref{fig:comparison} (a)). The chord-to-point distance accumulation~\cite{ma2008robust} was noise-sensitive, yielding 28.19\% false detections, 71.81\% accuracy, and $0.87$~pixel error (Fig.~\ref{fig:comparison} (b)). The method in~\cite{geiger2012automatic} reached 95.94\% accuracy but systematically missed boundary corners, with 4.06\% false detections and $1.09$~pixel error (Fig.~\ref{fig:comparison} (c)). The approach in~\cite{wu2020checkerboard} suffered structural interference, producing high false detections and up to $1.20$~pixel error (Fig.~\ref{fig:comparison} (d)).In addition, Fig.~\ref{fig:comparison1} provides a detailed comparison of the differences in sub-pixel accuracy across various algorithms.Our algorithm, enhanced with a sub-pixel refinement module, achieved 97.68\% complete detection and a $0.47$~pixel error. Experiments were conducted on an Intel Core i9-12900KF CPU and an NVIDIA RTX 3090 GPU. 
+
+
+\begin{figure*}[htbp]
+\centering
+% 第一行
+\begin{minipage}{0.19\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/a.png}
+\end{minipage}
+\begin{minipage}{0.19\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/b.png}
+\end{minipage}
+\begin{minipage}{0.19\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/c.png}
+\end{minipage}
+\begin{minipage}{0.19\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/d.png}
+\end{minipage}
+\begin{minipage}{0.19\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/e.png}
+\end{minipage}
+
+\vspace{0.5em} % 两行图间距
+
+% 第二行
+\begin{minipage}{0.19\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/a1.png}
+\end{minipage}
+\begin{minipage}{0.19\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/b1.png}
+\end{minipage}
+\begin{minipage}{0.19\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/c1.png}
+\end{minipage}
+\begin{minipage}{0.19\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/d1.png}
+\end{minipage}
+\begin{minipage}{0.19\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/e1.png}
+\end{minipage}
+
+\vspace{0.5em} % 两行图间距
+
+% 第二行
+\begin{minipage}{0.19\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/6-1.png}
+\end{minipage}
+\begin{minipage}{0.19\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/6-2.png}
+\end{minipage}
+\begin{minipage}{0.19\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/6-3.png}
+\end{minipage}
+\begin{minipage}{0.19\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/6-4.png}
+\end{minipage}
+\begin{minipage}{0.19\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/6-5.png}
+\end{minipage}
+
+\vspace{0.5em} % 两行图间距
+
+% 第二行
+\begin{minipage}{0.19\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/7-1.png}
+    \subcaption{(a)}
+\end{minipage}
+\begin{minipage}{0.19\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/7-2.png}
+    \subcaption{(b)}
+\end{minipage}
+\begin{minipage}{0.19\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/7-3.png}
+    \subcaption{(c)}
+\end{minipage}
+\begin{minipage}{0.19\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/7-4.png}
+    \subcaption{(d)}
+\end{minipage}
+\begin{minipage}{0.19\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/7-5.png}
+    \subcaption{(e)}
+\end{minipage}
+
+\caption{Summary of issues in corner detection under non-occluded and occluded conditions. 
+The red dots depicted in the images represent the identified coordinates of the corners. 
+(a) Zhang.~\cite{zhang2002flexible} (b) Awrangjeb.~\cite{ma2008robust}. (c) Geiger.~\cite{geiger2012automatic}. (d) Wu.~\cite{wu2020checkerboard}. (e) Ours.}
+\label{fig:comparison}
+\end{figure*}
+
+\begin{figure*}[htbp]
+\centering
+\begin{minipage}{0.20\textwidth}
+    \centering
+    \includegraphics[width=\linewidth,height=1\textwidth]{images/4-1.png}
+\end{minipage}
+\hspace{0.2em}   % 调整缝隙，单位可用 em, cm, mm
+\begin{minipage}{0.20\textwidth}
+    \centering
+    \includegraphics[width=\linewidth,height=1\textwidth]{images/4-2.png}
+\end{minipage}
+\hspace{0.2em}
+\begin{minipage}{0.20\textwidth}
+    \centering
+    \includegraphics[width=\linewidth,height=1\textwidth]{images/4-3.png}
+\end{minipage}
+\hspace{0.2em}
+\begin{minipage}{0.20\textwidth}
+    \centering
+    \includegraphics[width=\linewidth,height=1\textwidth]{images/4-4.png}
+\end{minipage}
+\hspace{0.2em}
+\begin{minipage}{0.7\textwidth}
+    \centering
+    \includegraphics[width=\linewidth,height=0.065\textwidth]{images/4-5.png}
+\end{minipage}
+
+\caption{Corner Detection Accuracy Comparison. Each colored block represents a single pixel, and different point shapes indicate distinct corner detection algorithms as illustrated.}
+\label{fig:comparison1}
+\end{figure*}
+
+
+
+\begin{table}[htbp]
+\centering
+\caption{Comparative analysis of corner detection methods.}
+\label{tab:comparison}
+\begin{tabular}{lcccc}
+\toprule
+\hline
+\textbf{Algorithm} & \textbf{Precision (\%)} & \textbf{Recall (\%)} & \textbf{Bias (pixel)}  \\
+\hline
+Zhang.~\cite{zhang2002flexible} & 96.9787 & 91.2398 & 1.0978  \\
+Awrangjeb.~\cite{ma2008robust} & 71.8144 & 94.8411 & 0.8693  \\
+Geiger.~\cite{geiger2012automatic} & 95.9423 & 73.1123 & 1.0902  \\
+Wu.~\cite{wu2020checkerboard} & 93.8793 & 85.6621 & 1.2022  \\
+ChessBaseNet & 93.2313 & 93.3161 & 0.7311  \\
+Ours & \textbf{97.6775} & \textbf{94.9801} & \textbf{0.4684}  \\
+\hline
+\bottomrule
+\end{tabular}
+\end{table}
+
+We additionally conducted a comparative experiment to evaluate the robustness of Bouguet’s algorithm~\cite{bouguet2012camera} under image degradation conditions. In this test, both our Subpixel Refinement Module and Bouguet’s algorithm were provided with the same pixel-level corner coordinates as input. As shown in Fig.~\ref{fig:comparison3}, Bouguet’s algorithm fails to estimate precise corner localization when image quality deteriorates, exhibiting noticeable positional shifts. In contrast, our Subpixel Refinement Module preserves accurate corner positions under the same conditions, demonstrating robustness in detection performance.
+
+
+\begin{figure*}[htbp]
+\centering
+\begin{minipage}{0.20\textwidth}
+    \centering
+    \includegraphics[width=\linewidth,height=1\textwidth]{images/5-1.png}
+\end{minipage}
+\hspace{0.2em}   % 调整缝隙，单位可用 em, cm, mm
+\begin{minipage}{0.20\textwidth}
+    \centering
+    \includegraphics[width=\linewidth,height=1\textwidth]{images/5-2.png}
+\end{minipage}
+\hspace{0.2em}
+\begin{minipage}{0.20\textwidth}
+    \centering
+    \includegraphics[width=\linewidth,height=1\textwidth]{images/5-3.png}
+\end{minipage}
+\hspace{0.2em}
+\begin{minipage}{0.20\textwidth}
+    \centering
+    \includegraphics[width=\linewidth,height=1\textwidth]{images/5-4.png}
+\end{minipage}
+
+\caption{Comparison of Sub-pixel Corner Detection under Degradation. Ours (red points) and the Bouguet’s algorithm~\cite{bouguet2012camera} (yellow points) are compared, with blue points indicating the pixel-level corner coordinate inputs.}
+\label{fig:comparison3}
+\end{figure*}
+
+
+\subsection{Multi-Chessboard Instance Detection}
+
+In industrial scenarios, a single image may contain multiple chessboards with diverse scales, orientations, occlusions, and overlaps. To address this complexity, our method directly predicts semantic masks for chessboard regions, enabling one-shot separation of instances without predefined grid configurations. Connected-component analysis combined with heatmap-guided post-processing suppresses noise and splits weakly connected targets, ensuring accurate per-instance corner localization. This pipeline naturally supports parallel multi-instance processing and avoids reliance on row/column priors, yielding improved corner completeness and robustness under occlusion and clutter, as illustrated in Fig.~\ref{fig:multi_instance_ours}.
+
+
+
+
+\begin{figure*}[htbp]
+\centering
+% 第一行
+\begin{minipage}{0.24\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/0-1.png}
+    %\subcaption{(a)}
+\end{minipage}
+\begin{minipage}{0.24\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/0-2.png}
+    %\subcaption{(b)}
+\end{minipage}
+\begin{minipage}{0.24\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/1-1.png}
+    %\subcaption{(c)}
+\end{minipage}
+\begin{minipage}{0.24\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/1-2.png}
+    % \subcaption{(d)}
+\end{minipage}
+
+\vspace{0.5em} % 两行间距
+
+% 第二行
+\begin{minipage}{0.24\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/2-1.png}
+    % \subcaption{(e)}
+\end{minipage}
+\begin{minipage}{0.24\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/2-2.png}
+    % \subcaption{(f)}
+\end{minipage}
+\begin{minipage}{0.24\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/3-1.png}
+    % \subcaption{(g)}
+\end{minipage}
+\begin{minipage}{0.24\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/3-2.png}
+    % \subcaption{(h)}
+\end{minipage}
+
+\caption{Representative qualitative results for multi-checkerboard scenes. 
+Each subfigure shows detection results under varying conditions.}
+\label{fig:multi_instance_ours}
+\end{figure*}
+
+
+\section{Conclusion}
+In this work, we presented an improved UNet-based framework for accurate checkerboard corner detection, incorporating a dual-head structure for joint corner heatmap and region mask prediction and a sub-pixel refinement strategy for enhanced localization precision. experiments demonstrate that our method achieves state-of-the-art performance, particularly in noisy and challenging scenarios, while maintaining a favorable trade-off between accuracy and efficiency. Moreover, the proposed pipeline naturally extends to multi-checkerboard scenes through semantic masking and instance-level processing, enabling robust separation and precise localization of multiple, variably scaled checkerboards in a single forward pass. These capabilities make the method a compact, generalizable, and practical solution for real-world vision calibration tasks.
+
+\nocite{*}
+\bibliography{myReference}
+\bibliographystyle{splncs04}
+
+% \begin{thebibliography}{8}
+% \bibitem{Harris1988}
+% Harris C, Stephens M. A combined corner and edge detector[C]//Proceedings of the Fourth Alvey Vision Conference. 1988: 147-151.
+
+% \bibitem{Kanade1974}
+% Kanade T. Picture processing system by computer complex and recognition of human faces[D]. Kyoto University, 1974.
+
+% \bibitem{Haralick1992}
+% Haralick R M, Shapiro L G. Computer and robot vision[M]. Addison-Wesley Longman Publishing Co., Inc., 1991.
+
+% \bibitem{Wang2002}
+% Wang L L, Tsai W H. Camera calibration by vanishing lines for 3-D computer vision[J]. IEEE Transactions on Pattern Analysis and Machine Intelligence, 1991, 13(4): 370-376.
+
+% \bibitem{Lucchese2001}
+% Lucchese L, Mitra S K. Using saddle points for subpixel feature detection in camera calibration targets[C]//Asia-Pacific Conference on Circuits and Systems. IEEE, 2002, 2: 191-195.
+
+% \bibitem{VanDeWeijer2006}
+% Van De Weijer J, Gevers T, Smeulders A W M. Robust photometric invariant features from the color tensor[J]. IEEE Transactions on Image Processing, 2005, 15(1): 118-127.
+
+% \bibitem{opencv_checkerboard}
+% Bradski G, Kaehler A. Learning OpenCV: Computer vision with the OpenCV library[J]. Dr. Dobb's Journal of Software Tools, 2000, 2: 78-85.
+
+% \bibitem{ocamcalib2006}
+% Scaramuzza D, Martinelli A, Siegwart R. A toolbox for easily calibrating omnidirectional cameras[C]//2006 IEEE/RSJ International Conference on Intelligent Robots and Systems. IEEE, 2006: 5695-5701.
+
+% \bibitem{bennett2014chess}
+% Bennett S, Lasenby J. ChESS: Quick and robust detection of chess-board features[J]. Computer Vision and Image Understanding, 2014, 118: 197-210.
+
+% \bibitem{hessian1999}
+% Lindeberg T. Feature detection with automatic scale selection[J]. International Journal of Computer Vision, 1998, 30(2): 79-116.
+
+% \bibitem{MATE2016}
+% Donné S, De Vylder J, Goossens B, et al. MATE: Machine learning for adaptive calibration template detection[J]. Sensors, 2016, 16(11): 1858.
+
+% \bibitem{spitschan2018robust}
+% Spitschan B, Ostermann J. Robust Fourier-based checkerboard corner detection for camera calibration[C]//Iberoamerican Congress on Pattern Recognition. Springer, 2018: 538-546.
+
+% \bibitem{Duda2018}
+% Duda A, Frese U. Accurate detection and localization of checkerboard corners for calibration[C]//British Machine Vision Conference (BMVC). 2018: 1-12.
+
+% \bibitem{ma2008robust}
+% Awrangjeb M, Lu G. Robust image corner detection based on the chord-to-point distance accumulation technique[J]. IEEE Transactions on Multimedia, 2008, 10(6): 1059-1072.
+
+% \bibitem{geiger2012automatic}
+% Geiger A, Moosmann F, Car Ö, et al. Automatic camera and range sensor calibration using a single shot[C]//2012 IEEE International Conference on Robotics and Automation. IEEE, 2012: 3936-3943.
+
+% \bibitem{wu2020checkerboard}
+% Wu M, Wu J, Ma S, et al. Checkerboard corner detection based on corner gray distribution feature[J]. Laser Optoelectronics Progress, 2020, 57(10): 109-116.
+
+% \bibitem{bouguet2012camera}
+% Bouguet J Y. Camera calibration toolbox for MATLAB[EB/OL]. 2012. http://www.vision.caltech.edu/bouguetj/calib\_doc/index.html.
+
+% \bibitem{salehi2017tversky}
+% Salehi S S M, Erdogmus D, Gholipour A. Tversky loss function for image segmentation using 3D fully convolutional deep networks[J]. arXiv preprint arXiv:1706.05721, 2017.
+
+% \bibitem{zhang2002flexible}
+% Zhang Z. A flexible new technique for camera calibration[J]. IEEE Transactions on Pattern Analysis and Machine Intelligence, 2000, 22(11): 1330-1334.
+% \end{thebibliography}
+% \begin{thebibliography}{8}
+% \bibitem{ref_lncs1}
+% Yi K, Luo K, Luo X, et al. Ucmctrack: Multi-object tracking with uniform camera motion compensation[C]//Proceedings of the AAAI Conference on Artificial Intelligence. 2024, 38(7): 6702-6710.
+% \end{thebibliography}
+\end{document}

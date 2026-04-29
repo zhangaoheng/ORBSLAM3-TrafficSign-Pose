@@ -55,7 +55,11 @@ landmarkslam/data/
 *.zip
 *.avi
 *.txt
+# 但论文中的文本文件需要跟踪
+!landmarkslam/implement/paper/**/*.txt
 *.png
+# 但论文中的图片需要跟踪
+!landmarkslam/implement/paper/**/images/*.png
 *.ply
 *.jpg
 *.npy
@@ -91,3 +95,20 @@ landmarkslam/implement/data/deepseek/lines_all/camera_intrinsics.json
 landmarkslam/implement/data/deepseek/lines_all/AllFrames_trajectory.txt
 landmarkslam/implement/data/deepseek/lines_all/KeyFrames_trajectory.txt
 landmarkslam/implement/data/deepseek/lines_all/imu.txt
+
+landmarkslam/implement/data/deepseek/20260426_104450.7z
+
+# ==== LaTeX 论文编译产物 ====
+landmarkslam/implement/paper/**/*.pdf
+landmarkslam/implement/paper/**/*.aux
+landmarkslam/implement/paper/**/*.bbl
+landmarkslam/implement/paper/**/*.blg
+landmarkslam/implement/paper/**/*.log
+landmarkslam/implement/paper/**/*.out
+landmarkslam/implement/paper/**/*.toc
+landmarkslam/implement/paper/**/*.lof
+landmarkslam/implement/paper/**/*.lot
+landmarkslam/implement/paper/**/*.fls
+landmarkslam/implement/paper/**/*.fdb_latexmk
+landmarkslam/implement/paper/**/*.synctex.gz
+landmarkslam/implement/paper/**/*.run.xml
