@@ -1,235 +1,256 @@
-# ORB-SLAM3
+# ORB-SLAM3 Looming Metric Recovery
 
-### V1.0, December 22th, 2021
-**Authors:** Carlos Campos, Richard Elvira, Juan J. Gómez Rodríguez, [José M. M. Montiel](http://webdiis.unizar.es/~josemari/), [Juan D. Tardos](http://webdiis.unizar.es/~jdtardos/).
+基于 ORB-SLAM3 的 Looming 深度估计与度量位姿恢复流水线。通过平面目标的 Looming 膨胀效应，从单目 SLAM 轨迹中恢复绝对深度和度量位姿。
 
-The [Changelog](https://github.com/UZ-SLAMLab/ORB_SLAM3/blob/master/Changelog.md) describes the features of each version.
+---
 
-ORB-SLAM3 is the first real-time SLAM library able to perform **Visual, Visual-Inertial and Multi-Map SLAM** with **monocular, stereo and RGB-D** cameras, using **pin-hole and fisheye** lens models. In all sensor configurations, ORB-SLAM3 is as robust as the best systems available in the literature, and significantly more accurate. 
+## 1. 环境准备与代码拉取
 
-We provide examples to run ORB-SLAM3 in the [EuRoC dataset](http://projects.asl.ethz.ch/datasets/doku.php?id=kmavvisualinertialdatasets) using stereo or monocular, with or without IMU, and in the [TUM-VI dataset](https://vision.in.tum.de/data/datasets/visual-inertial-dataset) using fisheye stereo or monocular, with or without IMU. Videos of some example executions can be found at [ORB-SLAM3 channel](https://www.youtube.com/channel/UCXVt-kXG6T95Z4tVaYlU80Q).
-
-This software is based on [ORB-SLAM2](https://github.com/raulmur/ORB_SLAM2) developed by [Raul Mur-Artal](http://webdiis.unizar.es/~raulmur/), [Juan D. Tardos](http://webdiis.unizar.es/~jdtardos/), [J. M. M. Montiel](http://webdiis.unizar.es/~josemari/) and [Dorian Galvez-Lopez](http://doriangalvez.com/) ([DBoW2](https://github.com/dorian3d/DBoW2)).
-
-<a href="https://youtu.be/HyLNq-98LRo" target="_blank"><img src="https://img.youtube.com/vi/HyLNq-98LRo/0.jpg" 
-alt="ORB-SLAM3" width="240" height="180" border="10" /></a>
-
-### Related Publications:
-
-[ORB-SLAM3] Carlos Campos, Richard Elvira, Juan J. Gómez Rodríguez, José M. M. Montiel and Juan D. Tardós, **ORB-SLAM3: An Accurate Open-Source Library for Visual, Visual-Inertial and Multi-Map SLAM**, *IEEE Transactions on Robotics 37(6):1874-1890, Dec. 2021*. **[PDF](https://arxiv.org/abs/2007.11898)**.
-
-[IMU-Initialization] Carlos Campos, J. M. M. Montiel and Juan D. Tardós, **Inertial-Only Optimization for Visual-Inertial Initialization**, *ICRA 2020*. **[PDF](https://arxiv.org/pdf/2003.05766.pdf)**
-
-[ORBSLAM-Atlas] Richard Elvira, J. M. M. Montiel and Juan D. Tardós, **ORBSLAM-Atlas: a robust and accurate multi-map system**, *IROS 2019*. **[PDF](https://arxiv.org/pdf/1908.11585.pdf)**.
-
-[ORBSLAM-VI] Raúl Mur-Artal, and Juan D. Tardós, **Visual-inertial monocular SLAM with map reuse**, IEEE Robotics and Automation Letters, vol. 2 no. 2, pp. 796-803, 2017. **[PDF](https://arxiv.org/pdf/1610.05949.pdf)**. 
-
-[Stereo and RGB-D] Raúl Mur-Artal and Juan D. Tardós. **ORB-SLAM2: an Open-Source SLAM System for Monocular, Stereo and RGB-D Cameras**. *IEEE Transactions on Robotics,* vol. 33, no. 5, pp. 1255-1262, 2017. **[PDF](https://arxiv.org/pdf/1610.06475.pdf)**.
-
-[Monocular] Raúl Mur-Artal, José M. M. Montiel and Juan D. Tardós. **ORB-SLAM: A Versatile and Accurate Monocular SLAM System**. *IEEE Transactions on Robotics,* vol. 31, no. 5, pp. 1147-1163, 2015. (**2015 IEEE Transactions on Robotics Best Paper Award**). **[PDF](https://arxiv.org/pdf/1502.00956.pdf)**.
-
-[DBoW2 Place Recognition] Dorian Gálvez-López and Juan D. Tardós. **Bags of Binary Words for Fast Place Recognition in Image Sequences**. *IEEE Transactions on Robotics,* vol. 28, no. 5, pp. 1188-1197, 2012. **[PDF](http://doriangalvez.com/php/dl.php?dlp=GalvezTRO12.pdf)**
-
-# 1. License
-
-ORB-SLAM3 is released under [GPLv3 license](https://github.com/UZ-SLAMLab/ORB_SLAM3/LICENSE). For a list of all code/library dependencies (and associated licenses), please see [Dependencies.md](https://github.com/UZ-SLAMLab/ORB_SLAM3/blob/master/Dependencies.md).
-
-For a closed-source version of ORB-SLAM3 for commercial purposes, please contact the authors: orbslam (at) unizar (dot) es.
-
-If you use ORB-SLAM3 in an academic work, please cite:
-  
-    @article{ORBSLAM3_TRO,
-      title={{ORB-SLAM3}: An Accurate Open-Source Library for Visual, Visual-Inertial 
-               and Multi-Map {SLAM}},
-      author={Campos, Carlos AND Elvira, Richard AND G\´omez, Juan J. AND Montiel, 
-              Jos\'e M. M. AND Tard\'os, Juan D.},
-      journal={IEEE Transactions on Robotics}, 
-      volume={37},
-      number={6},
-      pages={1874-1890},
-      year={2021}
-     }
-
-# 2. Prerequisites
-We have tested the library in **Ubuntu 16.04** and **18.04**, but it should be easy to compile in other platforms. A powerful computer (e.g. i7) will ensure real-time performance and provide more stable and accurate results.
-
-## C++11 or C++0x Compiler
-We use the new thread and chrono functionalities of C++11.
-
-## Pangolin
-We use [Pangolin](https://github.com/stevenlovegrove/Pangolin) for visualization and user interface. Dowload and install instructions can be found at: https://github.com/stevenlovegrove/Pangolin.
-
-## OpenCV
-We use [OpenCV](http://opencv.org) to manipulate images and features. Dowload and install instructions can be found at: http://opencv.org. **Required at leat 3.0. Tested with OpenCV 3.2.0 and 4.4.0**.
-
-## Eigen3
-Required by g2o (see below). Download and install instructions can be found at: http://eigen.tuxfamily.org. **Required at least 3.1.0**.
-
-## DBoW2 and g2o (Included in Thirdparty folder)
-We use modified versions of the [DBoW2](https://github.com/dorian3d/DBoW2) library to perform place recognition and [g2o](https://github.com/RainerKuemmerle/g2o) library to perform non-linear optimizations. Both modified libraries (which are BSD) are included in the *Thirdparty* folder.
-
-## Python
-Required to calculate the alignment of the trajectory with the ground truth. **Required Numpy module**.
-
-* (win) http://www.python.org/downloads/windows
-* (deb) `sudo apt install libpython2.7-dev`
-* (mac) preinstalled with osx
-
-## ROS (optional)
-
-We provide some examples to process input of a monocular, monocular-inertial, stereo, stereo-inertial or RGB-D camera using ROS. Building these examples is optional. These have been tested with ROS Melodic under Ubuntu 18.04.
-
-# 3. Building ORB-SLAM3 library and examples
-
-Clone the repository:
-```
-git clone https://github.com/UZ-SLAMLab/ORB_SLAM3.git ORB_SLAM3
-```
-
-We provide a script `build.sh` to build the *Thirdparty* libraries and *ORB-SLAM3*. Please make sure you have installed all required dependencies (see section 2). Execute:
-```
+```bash
+# 克隆代码（包含子模块）
+git clone --recursive https://github.com/your-repo/ORB_SLAM3.git
 cd ORB_SLAM3
+
+# 编译 ORB-SLAM3 本体
 chmod +x build.sh
 ./build.sh
+
+# Python 虚拟环境
+python3 -m venv landmarkslam/yolo_venv
+source landmarkslam/yolo_venv/bin/activate
+pip install -r requirements.txt  # 见下方依赖清单
 ```
 
-This will create **libORB_SLAM3.so**  at *lib* folder and the executables in *Examples* folder.
-
-# 4. Running ORB-SLAM3 with your camera
-
-Directory `Examples` contains several demo programs and calibration files to run ORB-SLAM3 in all sensor configurations with Intel Realsense cameras T265 and D435i. The steps needed to use your own camera are: 
-
-1. Calibrate your camera following `Calibration_Tutorial.pdf` and write your calibration file `your_camera.yaml`
-
-2. Modify one of the provided demos to suit your specific camera model, and build it
-
-3. Connect the camera to your computer using USB3 or the appropriate interface
-
-4. Run ORB-SLAM3. For example, for our D435i camera, we would execute:
+### Python 依赖
 
 ```
-./Examples/Stereo-Inertial/stereo_inertial_realsense_D435i Vocabulary/ORBvoc.txt ./Examples/Stereo-Inertial/RealSense_D435i.yaml
+opencv-python
+numpy
+matplotlib
+pyyaml
+torch
+kornia
+scipy
+pyrealsense2       # Stage 1 bag 提取需要
 ```
 
-# 5. EuRoC Examples
-[EuRoC dataset](http://projects.asl.ethz.ch/datasets/doku.php?id=kmavvisualinertialdatasets) was recorded with two pinhole cameras and an inertial sensor. We provide an example script to launch EuRoC sequences in all the sensor configurations.
+---
 
-1. Download a sequence (ASL format) from http://projects.asl.ethz.ch/datasets/doku.php?id=kmavvisualinertialdatasets
+## 2. 数据获取
 
-2. Open the script "euroc_examples.sh" in the root of the project. Change **pathDatasetEuroc** variable to point to the directory where the dataset has been uncompressed. 
+原始数据（RealSense D456 `.bag` 录制文件，约 1.7 GB）不在 git 仓库中，需要从已有数据的设备传输。
 
-3. Execute the following script to process all the sequences with all sensor configurations:
-```
-./euroc_examples
-```
+### 最小方案：只传 .bag，其余由 pipeline 自动生成
 
-## Evaluation
-EuRoC provides ground truth for each sequence in the IMU body reference. As pure visual executions report trajectories centered in the left camera, we provide in the "evaluation" folder the transformation of the ground truth to the left camera reference. Visual-inertial trajectories use the ground truth from the dataset.
+```bash
+# 在已有数据的设备上执行 rsync
+rsync -avz --progress \
+    user@source-machine:/path/to/ORB_SLAM3-master/landmarkslam/implement/data/deepseek/20260426_104450.bag \
+    landmarkslam/implement/data/deepseek/
 
-Execute the following script to process sequences and compute the RMS ATE:
-```
-./euroc_eval_examples
-```
-
-# 6. TUM-VI Examples
-[TUM-VI dataset](https://vision.in.tum.de/data/datasets/visual-inertial-dataset) was recorded with two fisheye cameras and an inertial sensor.
-
-1. Download a sequence from https://vision.in.tum.de/data/datasets/visual-inertial-dataset and uncompress it.
-
-2. Open the script "tum_vi_examples.sh" in the root of the project. Change **pathDatasetTUM_VI** variable to point to the directory where the dataset has been uncompressed. 
-
-3. Execute the following script to process all the sequences with all sensor configurations:
-```
-./tum_vi_examples
+# 传输后运行流水线自动生成其余数据
+cd landmarkslam/implement/pipeline
+python run_pipeline.py
 ```
 
-## Evaluation
-In TUM-VI ground truth is only available in the room where all sequences start and end. As a result the error measures the drift at the end of the sequence. 
+### 完整传输：同步整个数据目录
 
-Execute the following script to process sequences and compute the RMS ATE:
+```bash
+rsync -avz --progress \
+    user@source-machine:/path/to/ORB_SLAM3-master/landmarkslam/implement/data/deepseek/ \
+    landmarkslam/implement/data/deepseek/
 ```
-./tum_vi_eval_examples
+
+### 验证数据状态
+
+```bash
+bash landmarkslam/implement/pipeline/setup_data.sh
 ```
 
-# 7. ROS Examples
+该脚本会检测 `20260426_104450.bag`、`lines_all/`、`lines1/`、`lines2/` 是否齐全，并给出后续操作指引。
 
-### Building the nodes for mono, mono-inertial, stereo, stereo-inertial and RGB-D
-Tested with ROS Melodic and ubuntu 18.04.
+### 数据组成
 
-1. Add the path including *Examples/ROS/ORB_SLAM3* to the ROS_PACKAGE_PATH environment variable. Open .bashrc file:
-  ```
-  gedit ~/.bashrc
-  ```
-and add at the end the following line. Replace PATH by the folder where you cloned ORB_SLAM3:
+| 组件 | 大小 | 来源 |
+|------|------|------|
+| `20260426_104450.bag` | 1.7 GB | 原始 RealSense D456 录制（RealSense Viewer 或 ROS bag） |
+| `lines_all/rgb/` + `depth/` | ~672 MB | Stage 1 从 .bag 提取 |
+| `lines_all/AllFrames_trajectory.txt` | ~300 KB | Stage 2 ORB-SLAM3 生成 |
+| `lines1/` | ~190 MB | Stage 3 从 lines_all 分割 |
+| `lines2/` | ~181 MB | Stage 3 从 lines_all 分割 |
 
-  ```
-  export ROS_PACKAGE_PATH=${ROS_PACKAGE_PATH}:PATH/ORB_SLAM3/Examples/ROS
-  ```
-  
-2. Execute `build_ros.sh` script:
+---
 
-  ```
-  chmod +x build_ros.sh
-  ./build_ros.sh
-  ```
-  
-### Running Monocular Node
-For a monocular input from topic `/camera/image_raw` run node ORB_SLAM3/Mono. You will need to provide the vocabulary file and a settings file. See the monocular examples above.
+## 3. 一键流水线
 
-  ```
-  rosrun ORB_SLAM3 Mono PATH_TO_VOCABULARY PATH_TO_SETTINGS_FILE
-  ```
+所有路径和参数集中管理在 `pipeline/pipeline_config.yaml` 中。流水线自动跳过已完成阶段。
 
-### Running Monocular-Inertial Node
-For a monocular input from topic `/camera/image_raw` and an inertial input from topic `/imu`, run node ORB_SLAM3/Mono_Inertial. Setting the optional third argument to true will apply CLAHE equalization to images (Mainly for TUM-VI dataset).
+```bash
+cd landmarkslam/implement/pipeline
 
-  ```
-  rosrun ORB_SLAM3 Mono PATH_TO_VOCABULARY PATH_TO_SETTINGS_FILE [EQUALIZATION]	
-  ```
+# 批量评估模式（默认）：遍历所有帧对，输出统计和图表
+python run_pipeline.py
 
-### Running Stereo Node
-For a stereo input from topic `/camera/left/image_raw` and `/camera/right/image_raw` run node ORB_SLAM3/Stereo. You will need to provide the vocabulary file and a settings file. For Pinhole camera model, if you **provide rectification matrices** (see Examples/Stereo/EuRoC.yaml example), the node will recitify the images online, **otherwise images must be pre-rectified**. For FishEye camera model, rectification is not required since system works with original images:
+# 交互模式：GUI 选帧 → LoFTR → 3D 可视化
+python run_pipeline.py --mode interactive
 
-  ```
-  rosrun ORB_SLAM3 Stereo PATH_TO_VOCABULARY PATH_TO_SETTINGS_FILE ONLINE_RECTIFICATION
-  ```
+# 全模式：先 batch 后 interactive
+python run_pipeline.py --mode full
 
-### Running Stereo-Inertial Node
-For a stereo input from topics `/camera/left/image_raw` and `/camera/right/image_raw`, and an inertial input from topic `/imu`, run node ORB_SLAM3/Stereo_Inertial. You will need to provide the vocabulary file and a settings file, including rectification matrices if required in a similar way to Stereo case:
+# 跳过指定阶段
+python run_pipeline.py --skip 1 2 3
+```
 
-  ```
-  rosrun ORB_SLAM3 Stereo_Inertial PATH_TO_VOCABULARY PATH_TO_SETTINGS_FILE ONLINE_RECTIFICATION [EQUALIZATION]	
-  ```
-  
-### Running RGB_D Node
-For an RGB-D input from topics `/camera/rgb/image_raw` and `/camera/depth_registered/image_raw`, run node ORB_SLAM3/RGBD. You will need to provide the vocabulary file and a settings file. See the RGB-D example above.
+### 5 个阶段
 
-  ```
-  rosrun ORB_SLAM3 RGBD PATH_TO_VOCABULARY PATH_TO_SETTINGS_FILE
-  ```
+| 阶段 | 功能 | 输入 | 输出 |
+|------|------|------|------|
+| 1️⃣ Bag 提取 | 从 .bag 提取 RGB/Depth/IMU | `20260426_104450.bag` | `lines_all/`（rgb, depth, imu, 内参） |
+| 2️⃣ ORB-SLAM3 建图 | 运行 `rgbd_tum` 生成真值轨迹 | `lines_all/` | `AllFrames_trajectory.txt` |
+| 3️⃣ 序列分割 | 自动切割两个子序列 | `lines_all/` | `lines1/` + `lines2/`（含轨迹） |
+| 4️⃣ ROI 标注 | 框选目标区域并缓存 | `lines1/rgb/` | `saved_rois.txt` |
+| 5️⃣ 主流水线 | 批量验证或交互度量恢复 | 前述所有输出 | 图表、报告、JSON 结果 |
 
-**Running ROS example:** Download a rosbag (e.g. V1_02_medium.bag) from the EuRoC dataset (http://projects.asl.ethz.ch/datasets/doku.php?id=kmavvisualinertialdatasets). Open 3 tabs on the terminal and run the following command at each tab for a Stereo-Inertial configuration:
-  ```
-  roscore
-  ```
-  
-  ```
-  rosrun ORB_SLAM3 Stereo_Inertial Vocabulary/ORBvoc.txt Examples/Stereo-Inertial/EuRoC.yaml true
-  ```
-  
-  ```
-  rosbag play --pause V1_02_medium.bag /cam0/image_raw:=/camera/left/image_raw /cam1/image_raw:=/camera/right/image_raw /imu0:=/imu
-  ```
-  
-Once ORB-SLAM3 has loaded the vocabulary, press space in the rosbag tab.
+---
 
-**Remark:** For rosbags from TUM-VI dataset, some play issue may appear due to chunk size. One possible solution is to rebag them with the default chunk size, for example:
-  ```
-  rosrun rosbag fastrebag.py dataset-room1_512_16.bag dataset-room1_512_16_small_chunks.bag
-  ```
+## 4. 项目结构
 
-# 8. Running time analysis
-A flag in `include\Config.h` activates time measurements. It is necessary to uncomment the line `#define REGISTER_TIMES` to obtain the time stats of one execution which is shown at the terminal and stored in a text file(`ExecTimeMean.txt`).
+```
+ORB_SLAM3-master/
+├── Examples/RGB-D/
+│   ├── rgbd_tum              # 预编译的 RGB-D 轨迹生成器
+│   └── TUM1.yaml             # 相机参数模板（pipeline 动态覆盖内参）
+│
+├── Vocabulary/ORBvoc.txt     # ORB 词典（编译时下载）
+│
+└── landmarkslam/implement/
+    ├── pipeline/                         # 🆕 一键流水线
+    │   ├── pipeline_config.yaml          #   集中配置（所有路径 + 参数）
+    │   ├── run_pipeline.py               #   5 阶段引擎
+    │   └── setup_data.sh                 #   数据安装引导
+    │
+    ├── main/                             # 主实验脚本
+    │   ├── test.py                       #   核心：batch 评估 + 交互度量恢复
+    │   ├── config.yaml                   #   pipeline 自动同步的配置文件
+    │   └── legacy/                       #   旧版独立脚本（备查）
+    │
+    ├── mid_FOE_Z_d/                      # Looming 深度模块
+    │   ├── pure_looming_depth.py         #   Looming 公式、轨迹加载、FOE
+    │   └── imgs_mid.py                   #   ROI 序列标注与缓存
+    │
+    ├── tools/                            # 工具库
+    │   ├── mid.py                        #   几何工具（线段检测、矩形中心）
+    │   ├── deepseek/                     #   数据提取工具
+    │   │   ├── deepseek_bag.py           #     .bag → lines_all
+    │   │   └── deepseek_cut_all.py       #     交互式序列分割
+    │   └── ...
+    │
+    └── data/deepseek/                    # 数据目录（gitignored）
+        ├── 20260426_104450.bag           #   原始录制文件（需 rsync）
+        ├── lines_all/                    #   Stage 1 产物
+        ├── lines1/                       #   Stage 3 产物
+        └── lines2/                       #   Stage 3 产物
+```
 
-# 9. Calibration
-You can find a tutorial for visual-inertial calibration and a detailed description of the contents of valid configuration files at  `Calibration_Tutorial.pdf`
+---
+
+## 5. 流水线细节
+
+### Stage 1 — Bag 提取
+
+使用 RealSense SDK 从 `.bag` 文件中提取对齐的 RGB 和 Depth 图像，同时提取 IMU 数据。自动写入`associations.txt`（TUM 格式，供 ORB-SLAM3 使用）。
+
+```bash
+# 也可手动运行
+python tools/deepseek/deepseek_bag.py
+```
+
+### Stage 2 — ORB-SLAM3 轨迹生成
+
+运行 `Examples/RGB-D/rgbd_tum` 二进制文件，输入 `lines_all/` 目录和 `associations.txt`，输出 `AllFrames_trajectory.txt`（TUM 格式的完整轨迹）。
+
+ORB-SLAM3 的相机 YAML 配置文件由 pipeline 根据 `pipeline_config.yaml` 的 `camera` 段动态生成。
+
+### Stage 3 — 序列分割
+
+从 `lines_all/` 按配置的帧索引范围切割出 `lines1/` 和 `lines2/`，自动复制 RGB/Depth 图像、生成 `associations.txt` 和 `trajectory.txt`。
+
+在 `pipeline_config.yaml` 中配置：
+```yaml
+split:
+  seq1_start: 0
+  seq1_end: 243
+  seq2_start: 260
+  seq2_end: 496
+```
+
+### Stage 4 — ROI 标注
+
+对 `lines1/rgb/` 逐帧运行视觉标注，框选目标平面区域并缓存为 `saved_rois.txt`。
+
+```bash
+# 也可手动运行
+python -c "from mid_FOE_Z_d.imgs_mid import process_sequence_with_cached_rois; process_sequence_with_cached_rois('data/deepseek/lines1/rgb')"
+```
+
+### Stage 5 — 主流水线
+
+**Batch 模式**：遍历 `lines1` 所有连续帧对（间隔 `frame_step`），计算 Looming Z 并与深度真值对比，输出：
+
+```
+batch_plots/
+├── 01_depth_comparison.png      # Z_gt vs Z_looming 散点 + Bland-Altman
+├── 02_error_histogram.png       # 绝对误差分布
+├── 03_error_timeseries.png      # 逐帧误差趋势
+├── 04_error_vs_depth.png        # 相对误差 vs 真实深度
+├── 05_d_comparison.png          # 平面距离 d 对比
+├── 06_dr_vs_error.png           # 膨胀量-误差关联
+└── batch_report.md              # Markdown 报告
+
+batch_results.json               # 详细统计结果
+experiment_results.txt           # 文本日志
+```
+
+**Interactive 模式**：GUI 选帧 → Looming 测距 → LoFTR 匹配 → 单应性分解 → 3D 正交验证 → 绝对平移恢复 → 精度评估。
+
+---
+
+## 6. 关键算法参数
+
+在 `pipeline_config.yaml` 中调整：
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `camera.fx/fy/cx/cy` | 426.37 / 425.67 / 435.53 / 244.97 | RealSense D456 内参 |
+| `algorithm.frame_step` | 15 | Looming 帧间步长 |
+| `algorithm.dr_threshold` | 5.0 | 最小膨胀量（像素） |
+| `algorithm.max_z_threshold` | 30.0 | 最大合理深度（米） |
+| `algorithm.min_delta_d` | 0.02 | 最小帧间运动（米） |
+| `algorithm.loftr_model` | outdoor | LoFTR 预训练模型 |
+
+---
+
+## 7. 在新设备上的完整部署流程
+
+```bash
+# ==== 1. 拉取代码 ====
+git clone <your-repo-url>
+cd ORB_SLAM3-master
+git checkout master
+
+# ==== 2. 初始化环境 ====
+python3 -m venv landmarkslam/yolo_venv
+source landmarkslam/yolo_venv/bin/activate
+pip install torch kornia opencv-python numpy matplotlib pyyaml scipy pyrealsense2
+
+# ==== 3. 获取数据 ====
+mkdir -p landmarkslam/implement/data/deepseek
+rsync -avz --progress user@source-machine:.../data/deepseek/20260426_104450.bag \
+    landmarkslam/implement/data/deepseek/
+
+# ==== 4. 运行流水线 ====
+cd landmarkslam/implement/pipeline
+python run_pipeline.py
+```
+
+流水线会自动检测已有数据，跳过已完成阶段，从 .bag 开始逐步生成所有文件。
