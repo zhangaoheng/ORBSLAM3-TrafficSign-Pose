@@ -41,17 +41,17 @@
 
 \begin{document}
 %
-\title{An End-to-end Approach for Chessboard Corner Detection and Subpixel Estimation}%
+\title{Research on Vehicle Localization Methods Based on Road Signage}%
 % \thanks{Corresponding author: Wenzhong Wang, Email: \email{wenzhong@ahu.edu.cn}}}
 
-\titlerunning{Chessboard Corner Detection and Subpixel Estimation}
+\titlerunning{Vehicle Localization Based on Road Signage}
 
 
 
 
 
 \author{
-Jian Xie \inst{1} \and 
+Aoheng Zhang \inst{1} \and 
 % Wenzhong Wang \inst{1}  
 Wenzhong Wang\inst{1}\thanks{Corresponding author: Wenzhong Wang, Email: \email{wenzhong@ahu.edu.cn}}
 % Jin Tang \inst{1}
@@ -90,11 +90,26 @@ Wenzhong Wang\inst{1}\thanks{Corresponding author: Wenzhong Wang, Email: \email{
 \maketitle              % typeset the header of the contribution
 %
 \begin{abstract}
-Accurate detection of chessboard corners is essential for camera calibration and industrial measurement. Traditional geometry-based methods often fail in complex scenarios, and generic deep learning detectors also struggle to maintain reliable corner localization under challenging conditions. We propose a neural network tailored for robust and precise corner detection under challenging conditions, including multi-chessboard scenes with varying scales and orientations. The task is formulated as joint board instance segmentation and corner detection. Our model adopts an encoder--dual-decoder architecture: a shared encoder extracts multi-scale image features, while two parallel decoders respectively predict the board confidence map for instance segmentation and background suppression, and the corner confidence map for initial corner localization. The board confidence map also enables reliable separation and localization of different chessboards within the same image, making the method well-suited for multi-chessboard detection. To overcome the precision limits of heatmap quantization, we introduce a sub-pixel refinement head that regresses fine-grained offsets for each detected corner, achieving sub-pixel accuracy.Experimental results on datasets with low illumination, occlusion, degraded textures, and multi-chessboard configurations demonstrate that our method outperforms state-of-the-art approaches in both detection accuracy and topology integrity.
+Loop closure detection is essential for correcting accumulated drift in visual SLAM systems.
+Conventional bag-of-words (BoW) methods rely on matching visual features between traversals,
+but their performance degrades severely when environmental conditions change---fog, rain,
+nighttime, or seasonal variations can dramatically alter the appearance of roads, buildings,
+and vegetation, causing BoW-based re-identification to fail. Road signage, in contrast, is
+engineered for consistent high visibility under diverse weather and lighting conditions:
+its standardized colors, retroreflective materials, and durable design ensure that a road sign
+looks largely the same regardless of whether the surrounding environment is shrouded in fog
+or bathed in sunlight. In this paper, we propose a novel loop closure paradigm that leverages
+road signage as a reliable semantic loop closure landmark, robust to the appearance changes
+that defeat conventional methods. Our framework couples a road sign detector and recognizer
+with the SLAM backend: when a previously mapped sign is re-identified under challenging
+conditions, its known 3D pose is retrieved to construct a direct absolute pose constraint that
+corrects accumulated drift. For accurate pose estimation, we implement a pipeline combining
+looming-based depth recovery, LoFTR feature matching, homography decomposition, and 3D
+geometric verification. Experiments on urban driving sequences demonstrate that our method
+achieves reliable loop closure and significantly reduces drift in scenarios where traditional
+BoW-based approaches fail due to weather- or lighting-induced appearance changes.
 
-\keywords{Chessboard Corner Detection  
-\and Sub-pixel Localization  
-\and U-Net}
+\keywords{Loop Closure Detection  \and Road Sign-based Localization  \and Visual SLAM  \and Appearance-robust Localization}
 \end{abstract}
 
 % The model employs an improved U-Net backbone with spatial–channel coordinated attention, multiscale contextual attention, and geometry-constrained modules to enhance feature representation. A local feature enhancement module captures fine corner details while suppressing background noise. An uncertainty-weighted multitask framework jointly optimizes chessboard segmentation and corner localization with adaptive loss balancing. 
@@ -103,29 +118,59 @@ Accurate detection of chessboard corners is essential for camera calibration and
 
 \section{Introduction}
 
+Loop closure detection is a critical component in visual SLAM systems, serving as the primary
+mechanism for correcting accumulated trajectory drift. Most existing approaches rely on
+bag-of-visual-words (BoW) models or global feature descriptors to recognize previously visited
+locations by matching visual features across traversals. However, a fundamental limitation of
+these methods is their sensitivity to environmental appearance changes. When the same location
+is traversed under different conditions---dense fog, heavy rain, nighttime illumination, or
+seasonal changes---the visual appearance of roads, buildings, and vegetation can be radically
+altered. Features extracted from the scene under these conditions often fail to match those
+captured during the mapping traversal, causing BoW-based re-identification to break down
+completely. This fragility severely limits the reliability of loop closure in autonomous driving
+applications where the vehicle must operate under diverse and unpredictable weather conditions.
 
-Chessboard corner detection is crucial for camera calibration, robotic navigation, and geometric alignment. Achieving industrial-level precision requires recovering all corners under complex imaging conditions and localizing them at sub-pixel accuracy. In practical scenes, multiple chessboards may appear at different scales, orientations, and occlusion levels, demanding algorithms that both detect corners reliably and associate them with their respective boards. Real-world images suffer from illumination variations, reflections, blur, distortion, and clutter, making corner identification highly ambiguous. Traditional handcrafted methods are sensitive to noise and contrast, struggle with instance separation, and lack sub-pixel localization, often producing large calibration errors.
+Road signage offers a compelling solution to this appearance-robustness problem. Road signs
+are engineered for consistent high visibility under exactly the conditions that defeat BoW methods:
+their standardized colors, retroreflective materials, and durable construction ensure that a speed
+limit or warning sign presents a nearly identical visual appearance whether observed in bright
+sunlight, thick fog, or at night. This intrinsic invariance to environmental appearance change
+makes road signs uniquely suited as persistent loop closure landmarks that remain identifiable
+across traversals regardless of weather or lighting conditions.
 
-In this work, we propose a learning-based approach to achieve robust corner detection for both single- and multi-chessboard scenarios. We formulate multi-chessboard corner detection as a simultaneous board segmentation and corner detection task, and propose to train a deep convolutional neural network for this task. The proposed deep CNN is an encoder-decoder architecture, which comprises of an encoder, two decoders, and a sub-pixel refinement head. The dual decoders are used to predict two confidence maps, one for boards and one for corners. Individual boards are segmented from the board confidence, and the board masks are used to effectively suppress background noise. The raw corners are extracted from the suppressed corner confidence map. The  sub-pixel refinement head regresses a sub-pixel offsets $(\Delta x, \Delta y)$ for each raw corner, thereby mitigating errors caused by heatmap quantization and noise fluctuations. We conduct training and evaluation on a dataset encompassing diverse lighting conditions, occlusions, and multi-chessboard configurations, equipped with precise sub-pixel ground-truth annotations. The overall detection workflow is illustrated in Fig.~\ref{fig:example}.
+In this paper, we propose a novel loop closure paradigm that leverages road signage as
+appearance-robust semantic landmarks, and present a complete implementation of road sign-based
+pose estimation. Our system pipeline operates as follows: (1) a road sign is detected and its
+boundary lines are extracted from the image; (2) the looming effect---the apparent expansion of
+the sign as the vehicle approaches---is used to recover the absolute depth via temporal kinematics,
+breaking the scale ambiguity inherent to monocular vision; (3) deep feature matching (LoFTR) is
+performed between frames from different traversals, followed by homography decomposition to
+obtain the relative rotation and translation direction; (4) the looming-derived depth is injected
+into the homography solution to recover the full metric relative pose; and (5) a 3D geometric
+verification step using the sign's internal structural orthogonality refines and validates the final
+pose estimate. When a previously mapped road sign is re-identified, this pipeline retrieves the
+sign's stored 3D pose and constructs a direct absolute pose constraint that corrects the SLAM
+trajectory drift---without relying on conventional feature matching or BoW retrieval.
 
-
-
+In summary, the main contributions of this work are:
+\begin{enumerate}
+    \item An appearance-robust loop closure paradigm that leverages road signage as persistent
+          semantic landmarks, overcoming the failure of conventional BoW methods under changing
+          weather and lighting conditions.
+    \item A complete road sign-based pose estimation pipeline integrating looming depth recovery,
+          LoFTR feature matching, homography decomposition, and 3D geometric verification
+          for accurate metric relative pose estimation.
+    \item A working implementation demonstrating that road signs remain reliably identifiable
+          and localizable under conditions where traditional visual features fail, validated on
+          real-world urban driving sequences.
+\end{enumerate}
 
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=0.8\textwidth]{images/3.png}
-\caption{Proposed end-to-end framework architecture: Dual-head network generates corner and semantic heatmaps, with patch-based sub-pixel offset regression for enhanced corner precision and structural completeness.}
-\label{fig:example}
+\caption{System framework: road sign detection and recognition module coupled with SLAM backend for semantic loop closure.}
+\label{fig:framework}
 \end{figure}
-
-
-In summary, the main contributions of this work are:
-\begin{enumerate}
-\item A method combining semantic-guided detection and patch-based sub-pixel refinement, enabling accurate single- and multi-chessboard corner detection under complex conditions.
-\item A semantic heatmap design that improves structural completeness and separates multiple chessboard instances.
-\item A lightweight refinement network that delivers stable sub-pixel localization beyond heatmap resolution limits.
-\item A new dataset with diverse scenarios and precise sub-pixel annotations for robust training and benchmarking.
-\end{enumerate}
 
 
 \section{Related Work}
