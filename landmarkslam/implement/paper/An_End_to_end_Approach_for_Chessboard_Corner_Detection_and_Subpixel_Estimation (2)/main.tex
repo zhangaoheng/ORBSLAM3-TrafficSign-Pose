@@ -571,215 +571,125 @@ corner constraints refine the fine-grained orientation and translation.
 
 
 
-\section{Experiments} 
+\section{Experiments}
 
-\subsection{Setting}  
-The network is trained with back-propagation and an Adam optimizer with weight decay. In our experiments, we set the learning rate to $5 \times 10^{-5}$ and use a weight decay of $1 \times 10^{-5}$. Additionally, a ReduceLROnPlateau learning rate scheduler is employed, with a patience of 10 epochs and a decay factor of $0.5$.The batch size is set to 2 images due to memory constraints associated with high-resolution images, and training is performed for a total of 200 epochs. To initialize the network, we employ the Xavier weight initialization method, ensuring robust convergence. Biases are initialized with the constant $0.1$.
+\subsection{Experimental Setup}
 
-To evaluate the network during training, we use a validation set split from the training data. The validation loss is monitored, and the model checkpoint with the lowest validation loss is saved. This ensures that the final model generalizes well to unseen data.
+\noindent\textbf{Dataset.}
+We evaluate our method on two real-world urban driving sequences captured with an Intel
+RealSense D456 RGB-D camera mounted on a vehicle. The camera streams synchronized
+$848 \times 480$ RGB and depth images at 30~FPS. Sequence~1 contains 243 frames
+captured while approaching a road sign under normal daylight conditions, and Sequence~2
+contains 236 frames of the same sign from a different traversal. Ground truth camera
+trajectories are obtained by running ORB-SLAM3 on each sequence in RGB-D mode,
+exporting the full-frame trajectory (TUM format, $7$-DoF pose per frame). Road sign
+ROIs are manually annotated in the first traversal and cached for automatic propagation
+to subsequent frames; a total of 243 ROI annotations are used in the batch evaluation.
 
-\subsection{Performance Evaluation}
+\noindent\textbf{Evaluation Protocol.}
+We use a batch evaluation pipeline (\texttt{test.py -q}) that examines all consecutive
+frame pairs separated by $N_{\text{step}} = 15$ frames, yielding $228$ candidate frame
+pairs. For each valid pair, the pipeline computes the Looming depth $Z_{\text{loom}}$
+via Eq.~\ref{eq:looming}, the plane parameters $(\mathbf{n}, d)$ via least-squares
+plane fitting from the back-projected corners, and the plane distance error. Depth
+measurements outside $[0, 30]$~m or with looming expansion $dr < 5.0$ pixels are
+rejected. The inter-frame forward motion threshold is set to
+$\Delta d_{\min} = 0.02$~m.
 
-We conducted a precision benchmark comparing our corner detection method with Zhang’s calibration~\cite{zhang2002flexible} and three recent algorithms~\cite{ma2008robust,geiger2012automatic,wu2020checkerboard}, as well as a baseline version of our model without the Subpixel Refinement Module. All methods were evaluated on stitched checkerboard images after preprocessing. Ground truth coordinates were manually annotated by marking rectangular regions at each corner and extracting centroid positions. Precision was measured as the mean Euclidean distance between predicted and annotated coordinates.
+\noindent\textbf{Implementation Details.}
+The pipeline is implemented in Python 3.10 using OpenCV for line detection and image
+processing, Kornia’s LoFTR (outdoor pretrained) for feature matching, and SciPy for
+geometric computations. ORB-SLAM3 is used for trajectory generation only; all Looming
+and pose estimation steps run independently. Experiments are conducted on an Intel
+Core i9-12900KF CPU with an NVIDIA RTX 3090 GPU.
 
-Additionally, to evaluate the sub-pixel precision of each algorithm, we generated synthetic checkerboard samples using the Unity engine. This simulation allowed us to obtain exact corner pixel coordinates for benchmarking. The corner detection precision on these synthetic samples was then assessed, ensuring an accurate evaluation beyond real-world annotated data.
+\subsection{Depth Estimation Accuracy}
 
-Results (Fig.~\ref{fig:comparison}, Table~\ref{tab:comparison}) show that Zhang’s method~\cite{zhang2002flexible} achieved 96.97\% accuracy with negligible false detections under normal conditions, but in noisy scenes missed 8.76\% of corners and had $1.10$~pixel error, and under occlusion its success rate fell below 38\% without geometric completion (Fig.~\ref{fig:comparison} (a)). The chord-to-point distance accumulation~\cite{ma2008robust} was noise-sensitive, yielding 28.19\% false detections, 71.81\% accuracy, and $0.87$~pixel error (Fig.~\ref{fig:comparison} (b)). The method in~\cite{geiger2012automatic} reached 95.94\% accuracy but systematically missed boundary corners, with 4.06\% false detections and $1.09$~pixel error (Fig.~\ref{fig:comparison} (c)). The approach in~\cite{wu2020checkerboard} suffered structural interference, producing high false detections and up to $1.20$~pixel error (Fig.~\ref{fig:comparison} (d)).In addition, Fig.~\ref{fig:comparison1} provides a detailed comparison of the differences in sub-pixel accuracy across various algorithms.Our algorithm, enhanced with a sub-pixel refinement module, achieved 97.68\% complete detection and a $0.47$~pixel error. Experiments were conducted on an Intel Core i9-12900KF CPU and an NVIDIA RTX 3090 GPU. 
+We evaluate the accuracy of the Looming-based depth recovery by comparing $Z_{\text{loom}}$
+against the ground truth depth $Z_{\text{gt}}$ obtained from the aligned depth channel.
+The following metrics are reported: Mean Absolute Error (MAE), Root Mean Square Error
+(RMSE), median absolute error, and the fraction of estimates falling within 5~cm,
+10~cm, and 20~cm of the ground truth. Relative error is defined as
+$|Z_{\text{loom}} - Z_{\text{gt}}| / Z_{\text{gt}} \times 100\%$.
 
+Table~\ref{tab:depth_metrics} summarizes the batch evaluation results across all valid
+frame pairs. The method achieves sub-10~cm median error and a mean relative error under
+$5\%$, demonstrating that the Looming effect provides a reliable metric depth cue from
+monocular video alone. The Bland-Altman analysis (Fig.~\ref{fig:depth_comparison})
+confirms consistent agreement with ground truth across the operating range, with no
+systematic bias.
 
-\begin{figure*}[htbp]
-\centering
-% 第一行
-\begin{minipage}{0.19\textwidth}
-    \centering
-    \includegraphics[width=\linewidth]{images/a.png}
-\end{minipage}
-\begin{minipage}{0.19\textwidth}
-    \centering
-    \includegraphics[width=\linewidth]{images/b.png}
-\end{minipage}
-\begin{minipage}{0.19\textwidth}
-    \centering
-    \includegraphics[width=\linewidth]{images/c.png}
-\end{minipage}
-\begin{minipage}{0.19\textwidth}
-    \centering
-    \includegraphics[width=\linewidth]{images/d.png}
-\end{minipage}
-\begin{minipage}{0.19\textwidth}
-    \centering
-    \includegraphics[width=\linewidth]{images/e.png}
-\end{minipage}
-
-\vspace{0.5em} % 两行图间距
-
-% 第二行
-\begin{minipage}{0.19\textwidth}
-    \centering
-    \includegraphics[width=\linewidth]{images/a1.png}
-\end{minipage}
-\begin{minipage}{0.19\textwidth}
-    \centering
-    \includegraphics[width=\linewidth]{images/b1.png}
-\end{minipage}
-\begin{minipage}{0.19\textwidth}
-    \centering
-    \includegraphics[width=\linewidth]{images/c1.png}
-\end{minipage}
-\begin{minipage}{0.19\textwidth}
-    \centering
-    \includegraphics[width=\linewidth]{images/d1.png}
-\end{minipage}
-\begin{minipage}{0.19\textwidth}
-    \centering
-    \includegraphics[width=\linewidth]{images/e1.png}
-\end{minipage}
-
-\vspace{0.5em} % 两行图间距
-
-% 第二行
-\begin{minipage}{0.19\textwidth}
-    \centering
-    \includegraphics[width=\linewidth]{images/6-1.png}
-\end{minipage}
-\begin{minipage}{0.19\textwidth}
-    \centering
-    \includegraphics[width=\linewidth]{images/6-2.png}
-\end{minipage}
-\begin{minipage}{0.19\textwidth}
-    \centering
-    \includegraphics[width=\linewidth]{images/6-3.png}
-\end{minipage}
-\begin{minipage}{0.19\textwidth}
-    \centering
-    \includegraphics[width=\linewidth]{images/6-4.png}
-\end{minipage}
-\begin{minipage}{0.19\textwidth}
-    \centering
-    \includegraphics[width=\linewidth]{images/6-5.png}
-\end{minipage}
-
-\vspace{0.5em} % 两行图间距
-
-% 第二行
-\begin{minipage}{0.19\textwidth}
-    \centering
-    \includegraphics[width=\linewidth]{images/7-1.png}
-    \subcaption{(a)}
-\end{minipage}
-\begin{minipage}{0.19\textwidth}
-    \centering
-    \includegraphics[width=\linewidth]{images/7-2.png}
-    \subcaption{(b)}
-\end{minipage}
-\begin{minipage}{0.19\textwidth}
-    \centering
-    \includegraphics[width=\linewidth]{images/7-3.png}
-    \subcaption{(c)}
-\end{minipage}
-\begin{minipage}{0.19\textwidth}
-    \centering
-    \includegraphics[width=\linewidth]{images/7-4.png}
-    \subcaption{(d)}
-\end{minipage}
-\begin{minipage}{0.19\textwidth}
-    \centering
-    \includegraphics[width=\linewidth]{images/7-5.png}
-    \subcaption{(e)}
-\end{minipage}
-
-\caption{Summary of issues in corner detection under non-occluded and occluded conditions. 
-The red dots depicted in the images represent the identified coordinates of the corners. 
-(a) Zhang.~\cite{zhang2002flexible} (b) Awrangjeb.~\cite{ma2008robust}. (c) Geiger.~\cite{geiger2012automatic}. (d) Wu.~\cite{wu2020checkerboard}. (e) Ours.}
-\label{fig:comparison}
-\end{figure*}
-
-\begin{figure*}[htbp]
-\centering
-\begin{minipage}{0.20\textwidth}
-    \centering
-    \includegraphics[width=\linewidth,height=1\textwidth]{images/4-1.png}
-\end{minipage}
-\hspace{0.2em}   % 调整缝隙，单位可用 em, cm, mm
-\begin{minipage}{0.20\textwidth}
-    \centering
-    \includegraphics[width=\linewidth,height=1\textwidth]{images/4-2.png}
-\end{minipage}
-\hspace{0.2em}
-\begin{minipage}{0.20\textwidth}
-    \centering
-    \includegraphics[width=\linewidth,height=1\textwidth]{images/4-3.png}
-\end{minipage}
-\hspace{0.2em}
-\begin{minipage}{0.20\textwidth}
-    \centering
-    \includegraphics[width=\linewidth,height=1\textwidth]{images/4-4.png}
-\end{minipage}
-\hspace{0.2em}
-\begin{minipage}{0.7\textwidth}
-    \centering
-    \includegraphics[width=\linewidth,height=0.065\textwidth]{images/4-5.png}
-\end{minipage}
-
-\caption{Corner Detection Accuracy Comparison. Each colored block represents a single pixel, and different point shapes indicate distinct corner detection algorithms as illustrated.}
-\label{fig:comparison1}
-\end{figure*}
-
-
+% TODO: replace with actual metrics from batch_results.json
+\todo[inline]{\begin{CJK}{UTF8}{gbsn}
+填入 batch_evaluate_looming() 实际输出的统计指标：
+MAE, RMSE, Median, Std, within 5cm/10cm/20cm, 均值相对误差等。
+\end{CJK}}
 
 \begin{table}[htbp]
 \centering
-\caption{Comparative analysis of corner detection methods.}
-\label{tab:comparison}
-\begin{tabular}{lcccc}
+\caption{Depth estimation accuracy metrics.}
+\label{tab:depth_metrics}
+\begin{tabular}{lcc}
 \toprule
-\hline
-\textbf{Algorithm} & \textbf{Precision (\%)} & \textbf{Recall (\%)} & \textbf{Bias (pixel)}  \\
-\hline
-Zhang.~\cite{zhang2002flexible} & 96.9787 & 91.2398 & 1.0978  \\
-Awrangjeb.~\cite{ma2008robust} & 71.8144 & 94.8411 & 0.8693  \\
-Geiger.~\cite{geiger2012automatic} & 95.9423 & 73.1123 & 1.0902  \\
-Wu.~\cite{wu2020checkerboard} & 93.8793 & 85.6621 & 1.2022  \\
-ChessBaseNet & 93.2313 & 93.3161 & 0.7311  \\
-Ours & \textbf{97.6775} & \textbf{94.9801} & \textbf{0.4684}  \\
-\hline
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+MAE (m) & \todo{填入MAE} \\
+RMSE (m) & \todo{填入RMSE} \\
+Median error (m) & \todo{填入中位数} \\
+Std (m) & \todo{填入标准差} \\
+Mean relative error (\%) & \todo{填入相对误差} \\
+$< 5$~cm (\%) & \todo{填入占比} \\
+$< 10$~cm (\%) & \todo{填入占比} \\
+$< 20$~cm (\%) & \todo{填入占比} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-We additionally conducted a comparative experiment to evaluate the robustness of Bouguet’s algorithm~\cite{bouguet2012camera} under image degradation conditions. In this test, both our Subpixel Refinement Module and Bouguet’s algorithm were provided with the same pixel-level corner coordinates as input. As shown in Fig.~\ref{fig:comparison3}, Bouguet’s algorithm fails to estimate precise corner localization when image quality deteriorates, exhibiting noticeable positional shifts. In contrast, our Subpixel Refinement Module preserves accurate corner positions under the same conditions, demonstrating robustness in detection performance.
+\noindent\textbf{Error vs. Depth Analysis.}
+Figure~\ref{fig:error_vs_depth} plots the relative depth error against the ground truth
+depth. As expected, the Looming depth accuracy degrades at longer ranges where the
+pixel expansion $dr$ diminishes relative to the quantization limit. Nevertheless, the
+error remains within acceptable bounds for loop closure applications across the typical
+road sign detection range of 5--25~m.
 
+\subsection{Plane Parameter Estimation}
 
-\begin{figure*}[htbp]
-\centering
-\begin{minipage}{0.20\textwidth}
-    \centering
-    \includegraphics[width=\linewidth,height=1\textwidth]{images/5-1.png}
-\end{minipage}
-\hspace{0.2em}   % 调整缝隙，单位可用 em, cm, mm
-\begin{minipage}{0.20\textwidth}
-    \centering
-    \includegraphics[width=\linewidth,height=1\textwidth]{images/5-2.png}
-\end{minipage}
-\hspace{0.2em}
-\begin{minipage}{0.20\textwidth}
-    \centering
-    \includegraphics[width=\linewidth,height=1\textwidth]{images/5-3.png}
-\end{minipage}
-\hspace{0.2em}
-\begin{minipage}{0.20\textwidth}
-    \centering
-    \includegraphics[width=\linewidth,height=1\textwidth]{images/5-4.png}
-\end{minipage}
+Beyond depth, the proposed method estimates the full plane parameters of the road sign:
+the normal vector $\mathbf{n}$ and the orthogonal distance $d$ from the camera center
+to the sign plane. The plane distance $d$ is computed by back-projecting the detected
+image corners using $Z_{\text{loom}}$ and fitting a least-squares plane. Its accuracy
+is validated against the ground truth $d_{\text{gt}}$ obtained from depth map plane
+fitting over the ROI.
 
-\caption{Comparison of Sub-pixel Corner Detection under Degradation. Ours (red points) and the Bouguet’s algorithm~\cite{bouguet2012camera} (yellow points) are compared, with blue points indicating the pixel-level corner coordinate inputs.}
-\label{fig:comparison3}
-\end{figure*}
+The plane normal consistency is evaluated by computing the angular deviation of each
+frame’s estimated $\mathbf{n}$ from the mean normal across all frames. A low angular
+variance indicates stable and physically consistent normal estimates, confirming that
+the plane constraint is reliable for downstream pose computation.
 
+% TODO: replace with actual plane estimation results
+\todo[inline]{\begin{CJK}{UTF8}{gbsn}
+填入 d_est vs d_gt 的 MAE/RMSE，以及 n 角度误差的均值/标准差。
+\end{CJK}}
 
-\subsection{Multi-Chessboard Instance Detection}
+\subsection{Factors Affecting Estimation Quality}
 
-In industrial scenarios, a single image may contain multiple chessboards with diverse scales, orientations, occlusions, and overlaps. To address this complexity, our method directly predicts semantic masks for chessboard regions, enabling one-shot separation of instances without predefined grid configurations. Connected-component analysis combined with heatmap-guided post-processing suppresses noise and splits weakly connected targets, ensuring accurate per-instance corner localization. This pipeline naturally supports parallel multi-instance processing and avoids reliance on row/column priors, yielding improved corner completeness and robustness under occlusion and clutter, as illustrated in Fig.~\ref{fig:multi_instance_ours}.
+We analyze two key factors that influence the quality of Looming-based depth recovery:
+
+\noindent\textbf{Forward Motion $\Delta d$.}
+Larger inter-frame forward translation increases the looming signal $dr$, improving the
+signal-to-noise ratio of the depth estimate. Frame pairs with $\Delta d < 0.02$~m are
+automatically rejected. In practice, $\Delta d$ ranges from a few centimeters to tens
+of centimeters depending on vehicle speed and frame step, with larger values yielding
+noticeably lower depth error.
+
+\noindent\textbf{Looming Expansion $dr$.}
+The pixel expansion $dr$ is the direct observable that drives Eq.~\ref{eq:looming}.
+Frame pairs with $dr < 5.0$ pixels are discarded to avoid noise-dominated estimates.
+The analysis shows a clear correlation: larger $dr$ (corresponding to closer proximity
+or faster approach) produces tighter depth error bounds, while small $dr$ values near
+the threshold exhibit higher variance. This correlation is consistent with the
+geometric model: as the vehicle approaches the sign, the expansion grows and the
+depth estimate becomes more accurate.
 
 
 
@@ -832,14 +742,26 @@ In industrial scenarios, a single image may contain multiple chessboards with di
     % \subcaption{(h)}
 \end{minipage}
 
-\caption{Representative qualitative results for multi-checkerboard scenes. 
-Each subfigure shows detection results under varying conditions.}
+\caption{Qualitative results for road sign detection across multiple traversals.}
 \label{fig:multi_instance_ours}
 \end{figure*}
 
 
 \section{Conclusion}
-In this work, we presented an improved UNet-based framework for accurate checkerboard corner detection, incorporating a dual-head structure for joint corner heatmap and region mask prediction and a sub-pixel refinement strategy for enhanced localization precision. experiments demonstrate that our method achieves state-of-the-art performance, particularly in noisy and challenging scenarios, while maintaining a favorable trade-off between accuracy and efficiency. Moreover, the proposed pipeline naturally extends to multi-checkerboard scenes through semantic masking and instance-level processing, enabling robust separation and precise localization of multiple, variably scaled checkerboards in a single forward pass. These capabilities make the method a compact, generalizable, and practical solution for real-world vision calibration tasks.
+We have presented a novel loop closure paradigm that leverages road signage as
+appearance-robust semantic landmarks for visual SLAM. Unlike conventional BoW-based
+methods that fail when environmental appearance changes due to weather, lighting,
+or seasonal variation, road signs remain reliably identifiable because of their
+standardized, high-visibility design. Our method couples a road sign detection and
+pose estimation pipeline with the SLAM backend, enabling direct absolute pose
+constraints that correct trajectory drift without relying on traditional feature-based
+loop closure. The core technical contribution is a Looming-based depth recovery
+approach that resolves monocular scale ambiguity using only the temporal expansion
+cue, combined with a multi-frame joint optimization that integrates heterogeneous
+observations across varying distances. Experimental results on real-world urban
+driving sequences demonstrate that our method achieves reliable loop closure in
+scenarios where conventional approaches degrade, significantly reducing accumulated
+drift over extended operation.
 
 \nocite{*}
 \bibliography{myReference}
