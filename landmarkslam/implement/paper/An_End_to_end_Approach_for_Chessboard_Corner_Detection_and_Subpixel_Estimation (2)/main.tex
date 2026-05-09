@@ -525,8 +525,7 @@ are the projected corner pixel coordinates. This constraint encodes the translat
 parallax information from distant views, providing strong depth constraints despite
 the lack of fine corner features.
 
-\todo[inline]{\begin{CJK}{UTF8}{gbsn}
-这一段内容有误，后续删除或修改。
+\todo[inline]{\begin{CJK}{UTF8}{gbsn}这一段有误，后续删除或修改。
 \noindent\textbf{Structural Priors.}
 
 The SLAM map provides sparse 3D point clouds of the scene background. For road signs
@@ -619,28 +618,25 @@ monocular video alone. The Bland-Altman analysis (Fig.~\ref{fig:depth_comparison
 confirms consistent agreement with ground truth across the operating range, with no
 systematic bias.
 
-% TODO: replace with actual metrics from batch_results.json
-\todo[inline]{\begin{CJK}{UTF8}{gbsn}
-填入 batch_evaluate_looming() 实际输出的统计指标：
-MAE, RMSE, Median, Std, within 5cm/10cm/20cm, 均值相对误差等。
-\end{CJK}}
+\todo[inline]{\begin{CJK}{UTF8}{gbsn}填入batch\_evaluate\_looming输出的MAE, RMSE, Median, Std等指标。\end{CJK}}
 
+% TODO: 运行 batch_evaluate_looming() 后填入实际数据
 \begin{table}[htbp]
 \centering
 \caption{Depth estimation accuracy metrics.}
 \label{tab:depth_metrics}
-\begin{tabular}{lcc}
+\begin{tabular}{lc}
 \toprule
 \textbf{Metric} & \textbf{Value} \\
 \midrule
-MAE (m) & \todo{填入MAE} \\
-RMSE (m) & \todo{填入RMSE} \\
-Median error (m) & \todo{填入中位数} \\
-Std (m) & \todo{填入标准差} \\
-Mean relative error (\%) & \todo{填入相对误差} \\
-$< 5$~cm (\%) & \todo{填入占比} \\
-$< 10$~cm (\%) & \todo{填入占比} \\
-$< 20$~cm (\%) & \todo{填入占比} \\
+MAE (m) & --- \\
+RMSE (m) & --- \\
+Median error (m) & --- \\
+Std (m) & --- \\
+Mean relative error (\%) & --- \\
+$< 5$~cm (\%) & --- \\
+$< 10$~cm (\%) & --- \\
+$< 20$~cm (\%) & --- \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -666,10 +662,7 @@ frame’s estimated $\mathbf{n}$ from the mean normal across all frames. A low a
 variance indicates stable and physically consistent normal estimates, confirming that
 the plane constraint is reliable for downstream pose computation.
 
-% TODO: replace with actual plane estimation results
-\todo[inline]{\begin{CJK}{UTF8}{gbsn}
-填入 d_est vs d_gt 的 MAE/RMSE，以及 n 角度误差的均值/标准差。
-\end{CJK}}
+\todo[inline]{\begin{CJK}{UTF8}{gbsn}填入 d\_est vs d\_gt 的 MAE/RMSE 以及 n 角度误差的均值/标准差。\end{CJK}}
 
 \subsection{Factors Affecting Estimation Quality}
 
