@@ -154,9 +154,22 @@ trajectory drift---without relying on conventional feature matching or BoW retri
 
 In summary, the main contributions of this work are:
 \begin{enumerate}
-    \item An appearance-robust loop closure paradigm that leverages road signage as persistent
-          semantic landmarks, overcoming the failure of conventional BoW methods under changing
-          weather and lighting conditions.
+    \item \textbf{An appearance-robust loop closure paradigm using road signage as semantic landmarks.}
+          Conventional BoW-based loop closure fails when environmental appearance changes due to
+          weather, lighting, or seasonal variation, because the same location can look dramatically
+          different across traversals. We demonstrate that road signage---engineered for consistent
+          high visibility under diverse conditions---remains reliably identifiable when the surrounding
+          scene does not. Our core technical enabler is a \textbf{looming-based absolute depth recovery}
+          method that resolves the fundamental scale ambiguity of monocular vision without requiring
+          any known physical dimensions of the target. As the vehicle approaches a planar road sign,
+          the apparent expansion of the sign in the image plane (the looming effect) is captured by
+          measuring the radial distance change $dr = r_{\text{near}} - r_{\text{far}}$ of the sign center
+          relative to the focus of expansion (FOE). Combined with the inter-frame camera displacement
+          $\Delta d$ from visual odometry, the absolute depth is recovered as
+          $Z_{\text{loom}} = r_{\text{near}} \cdot \Delta d / dr - \Delta d$.
+          This formulation exploits only the temporal expansion cue and relative motion, making it
+          fundamentally independent of scene texture, lighting, or weather conditions.
+
     \item A complete road sign-based pose estimation pipeline integrating looming depth recovery,
           LoFTR feature matching, homography decomposition, and 3D geometric verification
           for accurate metric relative pose estimation.
@@ -175,143 +188,274 @@ In summary, the main contributions of this work are:
 
 \section{Related Work}
 
-Checkerboard corner detection methods can generally be divided into two categories: detection of checkerboard corners and sub-pixel corner refinement.
+Existing approaches to visual loop closure and road sign-based localization can be broadly categorized into three areas: appearance-based loop closure detection, road sign detection and recognition, and metric pose estimation from planar targets.
 
-\subsection{Detection of Checkerboard Corners}
-Early approaches often relied on general detectors, such as the Harris detector~\cite{Harris1988}, combined with line fitting to extract candidate corners~\cite{Haralick1992,Kanade1974,Wang2002}. These methods perform well on images with minimal distortion but tend to fail under severe distortion or extreme viewpoints. Gradient sign-change detection~\cite{Lucchese2001} alleviates some of these issues, but its effectiveness diminishes in cluttered environments. An improved Harris detector based on color constancy~\cite{VanDeWeijer2006} achieves more stable results under complex illumination, while a hyperbolic tangent model enables sub-pixel localization and reduces false positives. Nonetheless, these approaches remain sensitive to distortion and pose variations.
+\subsection{Visual Loop Closure Detection}
 
-Specialized detectors leverage checkerboard geometry through diverse techniques. The OpenCV implementation~\cite{opencv_checkerboard} groups detected black quadrilaterals into a complete board and derives corners from edge intersections, yielding reliable results with thick borders and simple backgrounds. The OCamcalib Toolbox~\cite{ocamcalib2006} extends this to address pronounced lens distortion. ChESS~\cite{bennett2014chess} applies circular sampling with simple arithmetic for high efficiency, but is prone to spurious background responses and requires image-specific thresholding; its successor incorporates machine learning to reduce false positives. Saddle-point approaches, such as the Hessian detector~\cite{hessian1999} and ROCHADE, offer efficiency yet suffer reduced robustness. ROCHADE constructs a binary edge graph to extract saddle points, performing well under low resolution and extreme poses, but declining with substantial distortion or uneven illumination.
+Loop closure detection has been extensively studied in the visual SLAM literature.
+Early approaches relied on bag-of-visual-words (BoW) models~\cite{Harris1988}, which
+quantize local image features into a visual vocabulary and use term frequency-inverse
+document frequency (TF-IDF) scoring to efficiently retrieve candidate matches from a
+database of keyframes. Systems such as ORB-SLAM~\cite{Haralick1992} demonstrated
+the effectiveness of BoW-based loop closure in real-time monocular SLAM, achieving
+reliable drift correction in indoor and structured outdoor environments.
 
-Template matching is also employed. Geiger et al.~\cite{geiger2012automatic} combined prototype matching with region growing to detect checkerboard patterns. These methods typically degrade under strong rotation or distortion.
+A fundamental limitation of these feature-based approaches, however, is their
+sensitivity to changes in environmental appearance. Under varying illumination,
+weather conditions, or seasonal changes, the local features extracted from the same
+physical location can differ dramatically, causing BoW-based retrieval to fail.
+Researchers have explored several directions to improve appearance robustness,
+including the use of learned global descriptors~\cite{VanDeWeijer2006} such as
+NetVLAD, which trains a convolutional neural network to produce viewpoint- and
+illumination-invariant place descriptors, and sequence-based matching techniques
+that exploit temporal consistency to filter unreliable matches.
 
-With the rise of deep learning, several neural network-based approaches for checkerboard corner detection have been explored. MATE~\cite{MATE2016}, for instance, employs a shallow three-layer convolutional network to extract intrinsic features. While it demonstrates some improvements, the method generates many false positives on medium- and high-resolution images, likely due to the limited representational capacity of the model and the absence of effective post-processing steps.
+Object-level SLAM and semantic loop closure represent a more recent paradigm.
+Instead of matching low-level features, these methods detect and associate semantic
+objects---such as buildings, signs, or landmarks---as loop closure candidates.
+Cieslewski et al.~\cite{bennett2014chess} proposed data-efficient decentralized
+visual SLAM using object-level data association, while Barbosa et al.~\cite{ocamcalib2006}
+demonstrated fiducial marker-based localization for GPS-denied environments.
+These approaches are inherently more robust to appearance variation because
+semantic object detectors can recognize their targets under significant changes in
+viewpoint and lighting.
 
-Our method differs from prior approaches in two key aspects.First, we augment corner detection with a semantic heatmap prediction, which provides explicit global context to suppress background clutter and recover occluded or low-contrast corners — a capability generally absent in traditional and existing learning-based methods. Second, by introducing a dedicated sub-pixel refinement stage, we overcome the quantization limits of heatmap outputs and attain robust localization under noise, distortion, and extreme viewpoints, where conventional refinement operators often fail.
+Road sign detection and recognition has been a active research topic in autonomous
+driving. Modern detectors based on YOLO and Faster R-CNN achieve high accuracy
+on standard traffic sign benchmarks, and recent works have extended these methods
+to handle challenging conditions such as low illumination and motion blur.
+However, most existing works treat road sign detection as a standalone perception
+task rather than integrating it into the SLAM loop closure pipeline.
 
-\subsection{Sub-pixel Corner Refinement}
-After initial detection, corner positions often require refinement. Existing methods fall into two categories.
+Our method differs from prior work by explicitly coupling road sign detection with
+the SLAM backend for appearance-robust loop closure. Unlike general object-level
+SLAM approaches that rely on arbitrary objects, we exploit the engineered properties
+of road signs---standardized appearance, retroreflective materials, and fixed
+positions---to achieve reliable re-identification under the exact conditions (fog,
+nighttime, rain) that defeat conventional BoW-based methods. Furthermore, we
+extend beyond detection to full metric pose estimation by combining looming depth
+recovery with feature matching and geometric verification.
 
-The first relies on pixel intensity. Edge approximation, as in OpenCV, uses gradient filters for efficiency but loses accuracy in noisy conditions. Surface fitting, as in ROCHADE, fits a polynomial over the local neighborhood and extracts the saddle point, with Hessian-based variants improving speed. These methods can be accurate but remain sensitive to noise and rotation.
+\subsection{Metric Pose Estimation from Planar Targets}
 
-The second applies sub-pixel peak detection to response maps~\cite{Duda2018}, locating local maxima from detector outputs. They are typically faster but depend heavily on the quality of initial detections.
+Estimating the 6-DoF pose between camera and a known planar target is a classical
+problem in computer vision with applications in augmented reality, robot navigation,
+and visual SLAM. Given a set of 2D-3D correspondences between image points and
+known points on a planar surface, the homography matrix $\mathbf{H}$ can be computed
+and decomposed to recover the relative rotation $\mathbf{R}$ and translation $\mathbf{t}$~\cite{Duda2018}.
+This approach is widely used for fiducial marker tracking and planar object detection.
 
-The proposed approach directly regresses sub-pixel offsets from localized image patches, mitigating noise- and blur-induced instability and generalizing to severe distortion, occlusion, and complex industrial scenes better than gradient- or surface-fitting methods.
+A fundamental challenge for monocular pose estimation is scale ambiguity. Without
+prior knowledge of the target's physical size or an external metric reference, the
+translation recovered from homography decomposition is only up to an unknown
+scale factor. This limitation is particularly problematic for loop closure, where the
+correct metric scale is essential for meaningful pose graph optimization.
+
+Several strategies have been developed to resolve this scale ambiguity. In RGB-D
+systems, the depth channel directly provides metric scale, but commodity depth
+sensors have limited effective range (typically 0.6--6~m for stereo-based sensors),
+making them unsuitable for distant targets. Stereo visual SLAM systems recover
+scale through fixed baseline triangulation, but require sufficient texture and baseline
+width. Monocular systems can recover scale through fusion with inertial sensors
+or by leveraging known object dimensions as geometric priors.
+
+The looming effect offers an alternative approach to metric depth recovery from
+monocular video. As a camera approaches a planar surface, the apparent expansion
+of the target in the image plane is directly related to the camera's forward motion
+and the absolute depth of the target. By combining the observed expansion ratio
+with the inter-frame displacement obtained from visual odometry, the absolute
+depth $Z$ can be computed independently of scene texture. This principle has been
+applied in aircraft landing guidance and vehicle collision avoidance, but its potential
+for metric pose recovery in visual SLAM loop closure remains underexplored.
+
+Deep feature matching has also advanced significantly in recent years. Detector-free
+methods such as LoFTR~\cite{opencv_checkerboard} establish dense correspondences
+between image pairs using Transformer-based architectures, outperforming traditional
+handcrafted features in low-texture and repetitive-pattern scenarios. When combined
+with robust estimation techniques such as RANSAC, these correspondences enable
+accurate homography computation even under challenging imaging conditions.
+
+Our approach integrates these techniques into a complete metric pose estimation
+pipeline for road sign-based loop closure. We leverage the looming effect to recover
+the absolute depth of the road sign from temporal monocular observations, inject
+this metric scale into the homography decomposition to resolve translation ambiguity,
+and employ LoFTR matching with RANSAC to compute the homography robustly
+across traversals under varying weather and lighting conditions.
 
 
 
 \section{Method}
 
-The proposed chessboard corner detection network targets high-precision localization in complex industrial and outdoor scenes with multiple chessboards. It takes a single-channel grayscale image as input and employs a modified U-Net~\cite{Ronneberger2015} encoder–decoder, optimized for chessboard patterns and multi-scale corner detection. Through multi-scale feature fusion, the network maintains spatial resolution while suppressing background noise. The pipeline includes chessboard mask generation, corner response estimation, and subpixel refinement, as illustrated in Fig.~\ref{fig:network_structure1} and Fig.~\ref{fig:network_structure2}.
-
-
-In the decoding stage, a dual-output structure is employed. 
-The chessboard mask branch localizes chessboard regions, while the corner response branch 
-generates pixel-level confidence maps for potential corners within these areas. 
-The mask constrains background noise, and the response map refines corner localization, 
-ensuring robust detection under multiple chessboards and complex scenes. 
-
-After pixel-level coordinates are obtained, a subpixel refinement module predicts 
-an offset $(\Delta x, \Delta y)$ using mid-level encoder features with high spatial and semantic 
-detail. This offset adjusts corner positions to subpixel accuracy. 
-The final output thus includes the chessboard mask and subpixel-accurate corner coordinates, enabling direct use in industrial measurement, vision calibration, and precise localization.
-
-
+We present a complete road sign-based loop closure and metric pose estimation system.
+The overall pipeline consists of four stages: (1) looming-based absolute depth recovery
+from temporal monocular observations; (2) road sign boundary extraction and inter-sequence
+feature matching; (3) homography decomposition with metric scale injection for 6-DoF
+relative pose estimation; and (4) 3D geometric verification using the road sign's structural
+properties. Figure~\ref{fig:pipeline} illustrates the complete system architecture.
 
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=0.8\textwidth]{images/2.png}
-    \caption{The architecture of the proposed network model.}
-    \label{fig:network_structure1}
+    \caption{Proposed road sign-based loop closure and pose estimation pipeline.}
+    \label{fig:pipeline}
 \end{figure}
 
-\begin{figure}[htbp]
-    \centering
-    \vspace{-2mm}
-    \includegraphics[scale=0.3]{images/4.png}
-    \vspace{-2mm}
-    \caption{Subpixel Refinement Module.}
-    \label{fig:network_structure2}
-\end{figure}
+\subsection{Looming-based Absolute Depth Recovery}
 
+The first stage recovers the metric depth of the road sign from monocular video
+using the looming effect. As the vehicle approaches a planar road sign, the apparent
+size of the sign in the image plane expands. By measuring this expansion across
+consecutive frames and combining it with the inter-frame camera displacement
+obtained from visual odometry, we can compute the absolute depth without any
+prior knowledge of the sign's physical dimensions.
 
-
-\subsection{Network Architecture}
-
-\noindent\textbf{Encoder}  
-To meet the precision requirements of corner detection, the backbone network is carefully optimized. First, standard max-pooling layers in the encoder are replaced with strided convolutions to minimize loss of spatial detail. Second, stacks of small convolution kernels (\(3\times3\)) are used instead of larger kernels, increasing the effective receptive field while enhancing feature representation capacity. Third, \(1\times1\) convolutions are introduced in multi-scale fusion to compress channels and facilitate cross-channel interaction, balancing computational efficiency and feature richness.
-
-These adjustments enable the network to capture fine geometric structures of corners while maintaining real-time operation, making it well-suited to industrial vision systems.  
+Let $\mathbf{P}_{\text{near}} = (u_{\text{near}}, v_{\text{near}})$ and
+$\mathbf{P}_{\text{far}} = (u_{\text{far}}, v_{\text{far}})$ denote the center
+pixel coordinates of the road sign in two frames separated by a known baseline.
+The relative camera motion $\mathbf{R}_{12}$ and $\mathbf{t}_{12}$ between these
+frames is obtained from ORB-SLAM3 trajectory. To compensate for rotation, we
+derotate the center point from the far frame using the homography induced by
+the rotation:
 
 \begin{equation}
-F = \mathrm{Enc}(X)
+\mathbf{P}_{\text{far}}^{\text{derot}} = \pi\left( \mathbf{K} \mathbf{R}_{12}^T \mathbf{K}^{-1} \tilde{\mathbf{P}}_{\text{far}} \right)
 \end{equation}
-where \(X\) denotes the input image, and \(F_{\text{enc}}\) represents the features extracted by the encoder.  
 
-The overall encoder architecture is illustrated in Fig.~\ref{fig:network_structure1}.
+where $\tilde{\mathbf{P}}$ denotes homogeneous coordinates, $\mathbf{K}$ is the
+camera intrinsic matrix, and $\pi([X,Y,Z]^T) = [X/Z, Y/Z]$ is the perspective
+projection function.
 
-\noindent\textbf{Mask Decoder}  
-The mask decoder is designed to generate a chessboard region mask that serves as a spatial prior for subsequent corner localization.  
-Given the encoded features \(F\) from the encoder, the mask decoder outputs a binary mask \(M\) through:
+The focus of expansion (FOE) is computed from the translation direction:
 \begin{equation}
-M = \mathrm{Dec}_M(F)
+\mathbf{FOE} = \left( f_x \frac{t_x}{t_z} + c_x,\; f_y \frac{t_y}{t_z} + c_y \right)
 \end{equation}
-where \(\mathrm{Dec}_M(\cdot)\) denotes the decoding process, and \(M\) represents the predicted mask image corresponding to the chessboard regions.
 
-By isolating connected components within \(M\), multiple chessboard instances can be efficiently separated, reducing detection errors in subsequent steps.  
-During decoding, low-level spatial details are fused with high-level semantic features, ensuring that the segmentation results preserve fine-grained edge information while maintaining region completeness and boundary precision.The structure of the mask decoder is shown in Fig.~\ref{fig:network_structure1}
-
-
-\noindent\textbf{Corner Decoder}  
-The corner decoder is designed to generate an initial confidence map of chessboard corners, providing pixel-wise corner likelihoods for subsequent precise localization.  
-Given the encoded features \(F\), the corner decoder produces a corner response map \(R\) through:
+The radial distances from the sign center to the FOE in each frame are:
 \begin{equation}
-R = \mathrm{Dec}_C(F)
+r_{\text{near}} = \|\mathbf{P}_{\text{near}} - \mathbf{FOE}\|,\qquad
+r_{\text{far}} = \|\mathbf{P}_{\text{far}}^{\text{derot}} - \mathbf{FOE}\|
 \end{equation}
-where \(\mathrm{Dec}_C(\cdot)\) denotes the decoding process and \(R\) is the predicted grayscale response map (\(0 \leq R(x,y) \leq 1\)), where each pixel value indicates the confidence of being a chessboard corner.
 
-This design enables the network to emphasize corner-relevant features while suppressing background noise, forming a reliable foundation for subsequent sub-pixel corner refinement.  
-The overall structure of the corner decoder is illustrated in Fig.~\ref{fig:network_structure1}.
+The looming expansion $dr = r_{\text{near}} - r_{\text{far}}$ captures the
+apparent growth of the sign as the vehicle approaches. The absolute depth is then
+derived from the relationship between radial expansion, forward motion, and depth:
 
-
-\noindent\textbf{Subpixel Refinement Module}  
-The subpixel refinement module is designed to predict coordinate offsets for each detected chessboard corner, thereby achieving subpixel-level localization accuracy.
-
-First, to eliminate background interference outside valid chessboard regions, the corner response map \(R\) is pointwise-multiplied by the chessboard mask \(M\). Non-maximum suppression (NMS) is then applied to the masked response, yielding the discrete set of pixel-level corner coordinates:
 \begin{equation}
-\mathbf{Y} = \mathrm{NMS}(M \cdot R)
+Z_{\text{loom}} = \frac{r_{\text{near}} \cdot \Delta d}{dr} - \Delta d
+\label{eq:looming}
 \end{equation}
-where $\mathbf{Y} = \{(x_i, y_i)\}$ denotes the centroid positions of detected corners. 
-Here, the operator ``$\cdot$'' denotes element-wise multiplication between $M$ and $R$.
 
-Next, for each candidate corner in \(\mathbf{Y}\), the subpixel refinement module takes as input the feature map \(F_3\) from the third decoder layer, which preserves sufficient spatial detail and semantic context for refinement, and output the sub-pixel offset for each corner.
+where $\Delta d = \|\mathbf{t}_{12}\|$ is the magnitude of the forward translation
+between the two frames. This formulation recovers the true metric depth without
+requiring any knowledge of the target's physical size, using only the temporal
+expansion cue and the relative motion from visual odometry.
 
-The refinement process is expressed as:
+\subsection{Road Sign Boundary Extraction and Feature Matching}
+
+Once the road sign region is identified (via ROI annotation or detection), we
+extract its four physical boundary lines using a line segment detector (LSD)
+within the region of interest. The four detected lines correspond to the top,
+bottom, left, and right edges of the sign. From these lines, we compute the
+four corner intersection points $\{\mathbf{C}_1, \mathbf{C}_2, \mathbf{C}_3,
+\mathbf{C}_4\}$ and the center $\mathbf{P}_{\text{center}}$ via pairwise
+line intersection followed by diagonal intersection.
+
+For cross-sequence loop closure, we perform deep feature matching between
+the current observation and the reference frame stored in the map. We employ
+LoFTR (Local Feature TRansformer), a detector-free feature matcher that
+establishes dense correspondences between image pairs using Transformer-based
+global and local feature fusion. Given two images $I_1$ (current) and $I_2$
+(reference), LoFTR produces a set of 2D-2D correspondences:
+
 \begin{equation}
-\mathbf{\Delta} = \Phi(F_3, \mathbf{Y})
+\mathcal{M} = \{( \mathbf{p}_1^{(i)}, \mathbf{p}_2^{(i)} ) \mid i = 1, \dots, N \}
 \end{equation}
-where \(\Phi(\cdot)\) denotes the offset prediction function, and $\Delta=\left\{(\Delta x_{i},\Delta y_{i})\right\}$. The raw corners are then refined to sub-pixel accuracy, yielding fine corner coordinates \(\mathbf{\hat{Y}} = \{(x_i+\Delta x_{i}, y_i + \Delta y_{i})\}\).
 
-In practice, a local feature patch (of size $3 \times 3$) centered at each $(x_i, y_i)$ is extracted from $F_3$. 
-This patch is processed by two successive $3 \times 3$ convolutions with ReLU activation to encode local structural characteristics. 
-The resulting features are mapped into the offset space via a $1 \times 1$ convolution, followed by global average pooling to produce the predicted offsets $(\Delta x_i, \Delta y_i)$.
-The overall structure of the subpixel refinement module is illustrated in Fig.~\ref{fig:network_structure2}.
+These correspondences are filtered using RANSAC to compute the homography
+matrix $\mathbf{H}$ that relates the planar road sign between the two views:
 
-% Next, for each candidate corner in \(\mathbf{y}'\), the subpixel refinement module takes as input the feature map \(F_2\) from the second decoder layer, which preserves sufficient spatial detail and semantic context for refinement.  
-% We examined feature maps from different decoder layers (\(F_1\), \(F_2\), \(F_3\)) and found that \(F_2\) provides the most suitable representation for subpixel offset prediction, offering a good trade-off between fine-grained localization precision and robustness to image noise.  
-% Therefore, \(F_2\) is selected as the input for the refinement stage.
+\begin{equation}
+\mathbf{H} = \arg\min_{\mathbf{H}} \sum_{i} \rho\left(
+\left\| \mathbf{p}_2^{(i)} - \pi\left(\mathbf{H} \tilde{\mathbf{p}}_1^{(i)}\right) \right\|^2
+\right)
+\end{equation}
 
+where $\rho(\cdot)$ is the robust Huber loss function. The RANSAC threshold
+is set to 3.0 pixels to reject outlier matches.
 
-% The refinement process is expressed as:
-% \begin{equation}
-% \mathbf{Y} = \varphi(F_2, \mathbf{y}')
-% \end{equation}
-% where \(\varphi(\cdot)\) denotes the offset prediction function that outputs refined coordinates \(\mathbf{Y} = \{(x'_i, y'_i)\}\).
+\subsection{Homography Decomposition and Metric Scale Recovery}
 
-% In practice, a local feature patch centered at each \((x_i, y_i)\) is extracted from \(F_2\). This patch is processed by two successive \(3\times3\) convolutions with ReLU activation to encode local structural characteristics. The resulting features are mapped into the offset space via a \(1\times1\) convolution, followed by global average pooling to produce the predicted offsets \((\Delta x, \Delta y)\). 
+The homography matrix $\mathbf{H}$ is decomposed into the relative rotation
+$\mathbf{R}_{12}$, translation direction $\mathbf{n}$, and plane normal
+$\mathbf{n}$ using the analytical decomposition method:
 
+\begin{equation}
+\{\mathbf{R}_{12}^{(k)}, \mathbf{t}_{12}^{(k)}, \mathbf{n}^{(k)}\}_{k=1}^{K}
+= \text{decomposeHomographyMat}(\mathbf{H}, \mathbf{K})
+\label{eq:decomp}
+\end{equation}
 
-\noindent\textbf{Inference Pipeline}
-During inference, the network predicts a chessboard region mask and a corner response map, where the mask suppresses background noise and provides valid corner candidates to be refined by the subpixel module for high-precision localization. For multi-chessboard scenes, each mask is processed independently to ensure proper instance separation. The final output consists of binary masks and subpixel-accurate corner coordinates, enabling precise measurement, calibration, and flexible adaptation to diverse applications.
+This decomposition yields up to $K = 4$ mathematically valid solutions. The
+translation recovered from homography decomposition is inherently up to an
+unknown scale factor: $\mathbf{t}_{12} = \mathbf{t}_n \cdot d$, where $d$ is
+the orthogonal distance from the camera to the sign plane.
+
+To resolve this scale ambiguity, we inject the metric depth recovered from the
+looming computation. Given the sign center pixel $\mathbf{P}_{\text{center}}$ and
+its looming depth $Z_{\text{loom}}$, the 3D point in camera coordinates is:
+
+\begin{equation}
+\mathbf{X}_{\text{center}} = Z_{\text{loom}} \cdot \mathbf{K}^{-1}
+\tilde{\mathbf{P}}_{\text{center}}
+\end{equation}
+
+The orthogonal plane distance $d$ is obtained by projecting this 3D point onto
+the plane normal $\mathbf{n}$:
+
+\begin{equation}
+d = \mathbf{n}^T \mathbf{X}_{\text{center}}
+\label{eq:scale_injection}
+\end{equation}
+
+The metric translation is then recovered as $\tilde{\mathbf{t}}_{12} =
+\mathbf{t}_n \cdot d$, yielding the full metric 6-DoF relative pose
+$\{\mathbf{R}_{12}, \tilde{\mathbf{t}}_{12}\}$ between the two traversals.
+
+\subsection{3D Geometric Verification}
+
+To disambiguate the multiple solutions from homography decomposition and to
+validate the final pose estimate, we exploit the structural orthogonality
+properties inherent to road signs. Road signs contain well-defined horizontal
+and vertical strokes (e.g., text, borders), which form orthogonal sets in 3D.
+
+Given the image lines (horizontal strokes $\mathcal{L}_h$ and vertical strokes
+$\mathcal{L}_v$) and the candidate plane normal $\mathbf{n}$, we back-project
+the 2D line directions onto the sign plane using the camera model and evaluate
+their orthogonality:
+
+\begin{equation}
+\epsilon_{\text{ortho}} = \frac{1}{|\mathcal{L}_h||\mathcal{L}_v|}
+\sum_{l_h \in \mathcal{L}_h} \sum_{l_v \in \mathcal{L}_v}
+\left| \mathbf{d}_h^{(l_h)}( \mathbf{n} ) \cdot \mathbf{d}_v^{(l_v)}( \mathbf{n} ) \right|
+\label{eq:ortho}
+\end{equation}
+
+where $\mathbf{d}_h$ and $\mathbf{d}_v$ are the 3D direction vectors of the
+horizontal and vertical strokes projected onto the plane defined by $\mathbf{n}$.
+The correct solution is the one that minimizes this orthogonality error, i.e.,
+the candidate for which the back-projected horizontal and vertical strokes are
+most perpendicular. This physical prior serves as a powerful disambiguation
+criterion without requiring any external calibration objects or inertial
+measurements.
+
+\begin{equation}
+k^* = \arg\min_{k} \epsilon_{\text{ortho}}^{(k)}
+\label{eq:best_solution}
+\end{equation}
+
+Once the best solution is identified, the final metric relative pose
+$\{\mathbf{R}_{12}^*, \tilde{\mathbf{t}}_{12}^*\}$ is obtained by combining the
+selected rotation with the looming-injected translation.
 
 
 
