@@ -2,6 +2,9 @@
 % LLNCS macro package for Springer Computer Science proceedings;
 % Version 2.21 of 2022/01/12
 %
+% ============================================================
+% 导言区：文档类、宏包、全局设置
+% ============================================================
 \documentclass[runningheads]{llncs}
 %
 \usepackage[T1]{fontenc}
@@ -42,6 +45,10 @@
 \makeatother
 
 
+% ============================================================
+% 正文开始
+% 标题、作者、机构
+% ============================================================
 \begin{document}
 %
 \title{Research on Vehicle Localization Methods Based on Road Signage}%
@@ -92,6 +99,9 @@ Wenzhong Wang\inst{1}\thanks{Corresponding author: Wenzhong Wang, Email: \email{
 
 \maketitle              % typeset the header of the contribution
 %
+% ============================================================
+% 摘要 + 关键词
+% ============================================================
 \begin{abstract}
 Loop closure detection is essential for correcting accumulated drift in visual SLAM systems.
 Conventional bag-of-words (BoW) methods rely on matching visual features between traversals,
@@ -119,6 +129,9 @@ BoW-based approaches fail due to weather- or lighting-induced appearance changes
 % Postprocessing with semantic masking and instance-level separation enables reliable multi-chessboard detection, followed by non-maximum suppression to generate pixel-level coordinates, refined by a sub-pixel module for high-precision offsets. 
 
 
+% ============================================================
+% 1. 引言：问题背景、动机、贡献列表
+% ============================================================
 \section{Introduction}
 
 Loop closure detection is a critical component in visual SLAM systems, serving as the primary
@@ -189,10 +202,14 @@ In summary, the main contributions of this work are:
 \end{figure}
 
 
+% ============================================================
+% 2. 相关工作
+% ============================================================
 \section{Related Work}
 
 Existing approaches to visual loop closure and road sign-based localization can be broadly categorized into three areas: appearance-based loop closure detection, road sign detection and recognition, and metric pose estimation from planar targets.
 
+% --- 2.1 视觉回环检测综述 ---
 \subsection{Visual Loop Closure Detection}
 
 Loop closure detection has been extensively studied in the visual SLAM literature.
@@ -239,6 +256,7 @@ nighttime, rain) that defeat conventional BoW-based methods. Furthermore, we
 extend beyond detection to full metric pose estimation by combining looming depth
 recovery with feature matching and geometric verification.
 
+% --- 2.2 平面目标度量位姿估计综述 ---
 \subsection{Metric Pose Estimation from Planar Targets}
 
 Estimating the 6-DoF pose between camera and a known planar target is a classical
@@ -287,6 +305,9 @@ across traversals under varying weather and lighting conditions.
 
 
 
+% ============================================================
+% 3. 方法：核心算法
+% ============================================================
 \section{Method}
 
 We present a complete road sign-based loop closure and metric pose estimation system.
@@ -303,6 +324,7 @@ properties. Figure~\ref{fig:pipeline} illustrates the complete system architectu
     \label{fig:pipeline}
 \end{figure}
 
+% --- 3.1 Looming 绝对深度恢复 ---
 \subsection{Looming-based Absolute Depth Recovery}
 
 The first stage recovers the metric depth of the road sign from monocular video
@@ -353,6 +375,7 @@ between the two frames. This formulation recovers the true metric depth without
 requiring any knowledge of the target's physical size, using only the temporal
 expansion cue and the relative motion from visual odometry.
 
+% --- 3.2 路牌边界提取 + LoFTR 特征匹配 ---
 \subsection{Road Sign Boundary Extraction and Feature Matching}
 
 Once the road sign region is identified (via ROI annotation or detection), we
@@ -386,6 +409,7 @@ matrix $\mathbf{H}$ that relates the planar road sign between the two views:
 where $\rho(\cdot)$ is the robust Huber loss function. The RANSAC threshold
 is set to 3.0 pixels to reject outlier matches.
 
+% --- 3.3 单应性分解 + 度量尺度恢复 ---
 \subsection{Homography Decomposition and Metric Scale Recovery}
 
 The homography matrix $\mathbf{H}$ is decomposed into the relative rotation
@@ -424,6 +448,7 @@ The metric translation is then recovered as $\tilde{\mathbf{t}}_{12} =
 \mathbf{t}_n \cdot d$, yielding the full metric 6-DoF relative pose
 $\{\mathbf{R}_{12}, \tilde{\mathbf{t}}_{12}\}$ between the two traversals.
 
+% --- 3.4 3D 正交几何验证（剔除错误解） ---
 \subsection{3D Geometric Verification}
 
 To disambiguate the multiple solutions from homography decomposition and to
@@ -462,6 +487,7 @@ selected rotation with the looming-injected translation.
 
 
 
+% --- 数据集描述（TODO: 需补充实际数据） ---
 \subsection{Dataset}
 
 \todo[inline]{\begin{CJK}{UTF8}{gbsn}
@@ -473,6 +499,7 @@ ORB-SLAM3 生成的轨迹真值 + 深度图真值，
 
 
 
+% --- 多帧联合位姿优化（BBox 约束 + 角点重投影 + 结构先验） ---
 \subsection{Multi-Frame Joint Pose Optimization}
 
 The road sign observations across a sequence of frames naturally provide complementary
@@ -570,8 +597,12 @@ corner constraints refine the fine-grained orientation and translation.
 
 
 
+% ============================================================
+% 4. 实验
+% ============================================================
 \section{Experiments}
 
+% --- 4.1 实验设置：数据集、评估协议、实现细节 ---
 \subsection{Experimental Setup}
 
 \noindent\textbf{Dataset.}
@@ -602,6 +633,7 @@ geometric computations. ORB-SLAM3 is used for trajectory generation only; all Lo
 and pose estimation steps run independently. Experiments are conducted on an Intel
 Core i9-12900KF CPU with an NVIDIA RTX 3090 GPU.
 
+% --- 4.2 深度估计精度：Looming Z vs GT ---
 \subsection{Depth Estimation Accuracy}
 
 We evaluate the accuracy of the Looming-based depth recovery by comparing $Z_{\text{loom}}$
@@ -648,6 +680,7 @@ pixel expansion $dr$ diminishes relative to the quantization limit. Nevertheless
 error remains within acceptable bounds for loop closure applications across the typical
 road sign detection range of 5--25~m.
 
+% --- 4.3 平面参数估计：d 和 n 的精度 ---
 \subsection{Plane Parameter Estimation}
 
 Beyond depth, the proposed method estimates the full plane parameters of the road sign:
@@ -664,6 +697,7 @@ the plane constraint is reliable for downstream pose computation.
 
 \todo[inline]{\begin{CJK}{UTF8}{gbsn}填入 d\_est vs d\_gt 的 MAE/RMSE 以及 n 角度误差的均值/标准差。\end{CJK}}
 
+% --- 4.4 影响估计质量的因素：Δd 和 dr ---
 \subsection{Factors Affecting Estimation Quality}
 
 We analyze two key factors that influence the quality of Looming-based depth recovery:
@@ -740,6 +774,9 @@ depth estimate becomes more accurate.
 \end{figure*}
 
 
+% ============================================================
+% 5. 结论
+% ============================================================
 \section{Conclusion}
 We have presented a novel loop closure paradigm that leverages road signage as
 appearance-robust semantic landmarks for visual SLAM. Unlike conventional BoW-based
@@ -757,6 +794,9 @@ scenarios where conventional approaches degrade, significantly reducing accumula
 drift over extended operation.
 
 \nocite{*}
+% ============================================================
+% 参考文献
+% ============================================================
 \bibliography{myReference}
 \bibliographystyle{splncs04}
 
