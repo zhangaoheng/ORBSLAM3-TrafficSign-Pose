@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>System Architecture</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #fff; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 40px; }
+
+/* === Title === */
+.diagram-title { text-align: center; font-size: 14px; font-weight: bold; color: #222; letter-spacing: 0.5px; margin-bottom: 28px; }
+
+/* === Main container - horizontal pipeline === */
+.pipeline { display: flex; align-items: flex-start; justify-content: center; gap: 0; }
+
+/* ===== Phase group ===== */
+.phase { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 300px; max-width: 340px; }
+
+/* Phase title bar */
+.phase-title { font-size: 12px; font-weight: bold; padding: 8px 0; text-align: center; width: 100%; letter-spacing: 1px; margin-bottom: 14px; text-transform: uppercase; }
+.phase.mapping .phase-title { color: #1a5276; border-bottom: 2.5px solid #2980b9; }
+.phase.reloc  .phase-title { color: #7e5109; border-bottom: 2.5px solid #e67e22; }
+.phase-title span { font-weight: normal; font-size: 10px; color: #888; text-transform: none; letter-spacing: 0; }
+
+/* ===== Connector ===== */
+.connector { display: flex; align-items: center; justify-content: center; padding: 0 8px; flex-shrink: 0; padding-top: 35px; }
+.connector-inner { font-size: 22px; color: #999; font-weight: 100; }
+
+/* ===== Step box ===== */
+.steps { display: flex; flex-direction: column; align-items: center; width: 100%; }
+.step { width: 92%; padding: 8px 12px; margin: 1px 0; border-radius: 4px; font-size: 11px; line-height: 1.5; position: relative; border: 1px solid #ddd; }
+
+.step-label { font-size: 11px; font-weight: bold; color: #333; margin-bottom: 2px; }
+.step-desc { font-size: 10px; color: #555; line-height: 1.4; }
+.step-eq { font-family: 'Times New Roman', 'CMU Serif', Georgia, serif; font-style: italic; font-size: 11px; color: #333; margin: 2px 0; }
+.step-code { font-family: 'Courier New', monospace; font-size: 8.5px; color: #888; }
+
+/* Colors for box types */
+.step-plain  { background: #fcfcfc; border-color: #d5d5d5; }
+.step-plain:hover { border-color: #bbb; }
+.step-core   { background: #fef9e7; border-color: #e6c74c; border-width: 1.5px; }
+.step-input  { background: #f8fbfd; border-color: #b8d4e8; }
+.step-output { background: #f0faf0; border-color: #8fc98f; }
+.step-core .step-label { color: #b8860b; }
+.step-input .step-label { color: #1a5276; }
+.step-output .step-label { color: #1a6b1a; }
+
+/* Arrow between steps */
+.arrow-row { font-size: 12px; color: #ccc; text-align: center; padding: 0; line-height: 1; height: 14px; }
+
+/* ===== Core tag ===== */
+.core-tag { display: inline-block; background: #f39c12; color: #fff; font-size: 7px; padding: 1px 6px; border-radius: 8px; font-weight: bold; letter-spacing: 0.3px; margin-left: 4px; vertical-align: middle; }
+
+/* ===== Footer ===== */
+.footer { text-align: center; margin-top: 25px; border-top: 1px solid #eee; padding-top: 10px; color: #bbb; font-size: 9px; }
+
+/* ===== Print-friendly ===== */
+@media print { body { padding: 20px; } }
+
+/* ===== Sub-group styling ===== */
+.sub-group { width: 92%; border: 1.5px dashed #bbb; border-radius: 5px; padding: 6px 8px; margin: 3px 0; position: relative; }
+.sub-group-label { position: absolute; top: -7px; left: 10px; background: #fff; padding: 0 5px; font-size: 8px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+.sub-step { font-size: 10.5px; padding: 4px 6px; margin: 2px 0; border-radius: 3px; border: none; background: #fafafa; }
+</style>
+</head>
+<body>
+
+<div class="diagram-title">Overall System Architecture</div>
+
+<div class="pipeline">
+
+  <!-- ============= PHASE 1: MAPPING ============= -->
+  <div class="phase mapping">
+    <div class="phase-title">Offline Mapping <span>/ 建图阶段</span></div>
+    <div class="steps">
+
+      <!-- Input -->
+      <div class="step step-input">
+        <div class="step-label">Input</div>
+        <div class="step-desc">Monocular RGB Sequence (RealSense D456, 848×480)</div>
+        <div class="step-code">ORB-SLAM3 trajectory · Camera matrix K</div>
+      </div>
+
+      <div class="arrow-row">&#x25BC;</div>
+
+      <!-- Step 1 -->
+      <div class="step step-plain">
+        <div class="step-label">① ROI Annotation &amp; Line Extraction</div>
+        <div class="step-desc">LSD line detector → 4 boundary lines of road sign</div>
+        <div class="step-code">process_sequence_with_cached_rois()</div>
+      </div>
+
+      <div class="arrow-row">&#x25BC;</div>
+
+      <!-- Step 2 -->
+      <div class="step step-plain">
+        <div class="step-label">② Corner &amp; Center Computation</div>
+        <div class="step-desc">Line intersections → {C₁, C₂, C₃, C₄} + P<sub>center</sub></div>
+        <div class="step-code">calculate_rectangle_center()</div>
+      </div>
+
+      <div class="arrow-row">&#x25BC;</div>
+
+      <!-- Core: Step 3 -->
+      <div class="step step-core">
+        <div class="step-label">③ Looming Depth Recovery<span class="core-tag">CORE</span></div>
+        <div class="step-desc">Temporal expansion → absolute metric depth</div>
+        <div class="step-code">calculate_pure_looming_Z_v2()</div>
+      </div>
+
+      <div class="arrow-row">&#x25BC;</div>
+
+      <!-- Step 4 -->
+      <div class="step step-plain">
+        <div class="step-label">④ Plane Parameter Estimation</div>
+        <div class="step-desc">Back-project corners → fit plane → <i>n</i> (normal), <i>d</i> (distance)</div>
+        <div class="step-code">estimate_plane_from_corners()</div>
+      </div>
+
+      <div class="arrow-row">&#x25BC;</div>
+
+      <!-- Output -->
+      <div class="step step-output">
+        <div class="step-label">Output</div>
+        <div class="step-desc">Sign Metric Pose <b>T<sub>WS</sub></b> &in; SE(3)</div>
+        <div class="step-code">→ Semantic Map Database</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============= CONNECTOR ============= -->
+  <div class="connector"><div class="connector-inner">&#x27A1;</div></div>
+
+  <!-- ============= PHASE 2: RELOCALIZATION ============= -->
+  <div class="phase reloc">
+    <div class="phase-title">Online Relocalization <span>/ 重定位阶段</span></div>
+    <div class="steps">
+
+      <!-- Input -->
+      <div class="step step-input">
+        <div class="step-label">Input</div>
+        <div class="step-desc">New Traversal RGB · Pre-built Sign Map</div>
+      </div>
+
+      <div class="arrow-row">&#x25BC;</div>
+
+      <!-- Step 5 -->
+      <div class="step step-plain">
+        <div class="step-label">⑤ Road Sign Re-identification</div>
+        <div class="step-desc">YOLO detection → feature retrieval → sign matching</div>
+      </div>
+
+      <div class="arrow-row">&#x25BC;</div>
+
+      <!-- Step 6 -->
+      <div class="step step-plain">
+        <div class="step-label">⑥ Corner &amp; Center Extraction</div>
+        <div class="step-desc">LSD line detection → 4 corners + center point</div>
+        <div class="step-code">extract_four_lines_from_real_image()</div>
+      </div>
+
+      <div class="arrow-row">&#x25BC;</div>
+
+      <!-- Step 7 -->
+      <div class="step step-plain">
+        <div class="step-label">⑦ LoFTR Feature Matching</div>
+        <div class="step-desc">Dense 2D-2D correspondences + RANSAC filtering</div>
+        <div class="step-code">match_images_with_loftr_roi() · Kornia LoFTR</div>
+      </div>
+
+      <div class="arrow-row">&#x25BC;</div>
+
+      <!-- Step 8 -->
+      <div class="step step-plain">
+        <div class="step-label">⑧ Homography Decomposition</div>
+        <div class="step-desc">Decompose H → up to 4 solutions {R, t<sub>n</sub>, n}</div>
+        <div class="step-code">cv2.decomposeHomographyMat(H, K)</div>
+      </div>
+
+      <div class="arrow-row">&#x25BC;</div>
+
+      <!-- Core: Step 9 -->
+      <div class="step step-core">
+        <div class="step-label">⑨ Metric Scale Injection<span class="core-tag">CORE</span></div>
+        <div class="step-desc">Looming depth resolves scale ambiguity → metric translation</div>
+      </div>
+
+      <div class="arrow-row">&#x25BC;</div>
+
+      <!-- Step 10 -->
+      <div class="step step-plain">
+        <div class="step-label">⑩ 3D Geometric Verification</div>
+        <div class="step-desc">Orthogonality check → select best solution k*</div>
+        <div class="step-code">evaluate_orthogonality() → &epsilon;<sub>ortho</sub></div>
+      </div>
+
+      <div class="arrow-row">&#x25BC;</div>
+
+      <!-- Output -->
+      <div class="step step-output">
+        <div class="step-label">Output</div>
+        <div class="step-desc"><b>Metric Relative Pose</b> {R<sub>12</sub>, t̃<sub>12</sub>}</div>
+        <div class="step-code">→ Absolute pose constraint → SLAM drift correction</div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  Implementation: main/test.py · mid_FOE_Z_d/pure_looming_depth.py · lines/Homography_loftr_tool.py · tools/mid.py
+</div>
+
+</body>
+</html>

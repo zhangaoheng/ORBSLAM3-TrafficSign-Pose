@@ -156,7 +156,13 @@ across traversals regardless of weather or lighting conditions.
 
 In this paper, we propose a novel loop closure paradigm that leverages road signage as
 appearance-robust semantic landmarks, and present a complete implementation of road sign-based
-pose estimation. Our system pipeline operates as follows: (1) a road sign is detected and its
+pose estimation. The overall framework of our system is illustrated in Fig.~\ref{fig:framework},
+which consists of two main phases: a mapping phase that detects road signs and computes their
+metric 3D poses from a monocular sequence using the looming effect, and a relocalization phase
+that re-identifies previously mapped signs across traversals and uses their stored poses to
+construct absolute pose constraints for drift correction.
+
+As shown in the figure, our system pipeline operates as follows: (1) a road sign is detected and its
 boundary lines are extracted from the image; (2) the looming effect---the apparent expansion of
 the sign as the vehicle approaches---is used to recover the absolute depth via temporal kinematics,
 breaking the scale ambiguity inherent to monocular vision; (3) deep feature matching (LoFTR) is
@@ -164,9 +170,10 @@ performed between frames from different traversals, followed by homography decom
 obtain the relative rotation and translation direction; (4) the looming-derived depth is injected
 into the homography solution to recover the full metric relative pose; and (5) a 3D geometric
 verification step using the sign's internal structural orthogonality refines and validates the final
-pose estimate. When a previously mapped road sign is re-identified, this pipeline retrieves the
-sign's stored 3D pose and constructs a direct absolute pose constraint that corrects the SLAM
-trajectory drift---without relying on conventional feature matching or BoW retrieval.
+pose estimate. When a previously mapped road sign is re-identified during a later traversal, this
+pipeline retrieves the sign's stored 3D pose and constructs a direct absolute pose constraint that
+corrects the SLAM trajectory drift---without relying on conventional feature matching or BoW
+retrieval.
 
 In summary, the main contributions of this work are:
 \begin{enumerate}
