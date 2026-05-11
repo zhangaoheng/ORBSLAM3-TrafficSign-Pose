@@ -1,27 +1,13 @@
-% This is samplepaper. tex, a sample chapter demonstrating the
-% LLNCS macro package for Springer Computer Science proceedings;
-% Version 2.21 of 2022/01/12
-%
 % ============================================================
 % 导言区：文档类、宏包、全局设置
 % ============================================================
 \documentclass[runningheads]{llncs}
-%
 \usepackage[T1]{fontenc}
 % T1 fonts will be used to generate the final print and online PDFs, 
 % so please use T1 fonts in your manuscript whenever possible. 
 % Other font encondings may result in incorrect characters. 
-%
 \usepackage{graphicx}
-% Used for displaying a sample figure. If possible, figure files should
 % be included in EPS format. 
-%
-% If you use the hyperref package, please uncomment the following two lines
-% to display URLs in blue roman font according to Springer's eBook style:
-%\usepackage{color}
-%\renewcommand\UrlFont{\color{blue}\rmfamily}
-%\urlstyle{rm}
-%
 % \documentclass{article}  
 \usepackage{algorithm}
 \usepackage{algpseudocode}
@@ -50,9 +36,7 @@
 % 标题、作者、机构
 % ============================================================
 \begin{document}
-%
 \title{Research on Vehicle Localization Methods Based on Road Signage}%
-% \thanks{Corresponding author: Wenzhong Wang, Email: \email{wenzhong@ahu.edu.cn}}}
 
 \titlerunning{Vehicle Localization Based on Road Signage}
 
@@ -64,41 +48,23 @@
 Aoheng Zhang \inst{1} \and 
 % Wenzhong Wang \inst{1}  
 Wenzhong Wang\inst{1}\thanks{Corresponding author: Wenzhong Wang, Email: \email{wenzhong@ahu.edu.cn}}
-% Jin Tang \inst{1}
 % Xiao Wang \inst{1} 
 }      
 
-% \authorrunning{Jian Xie et al. }
 
 \institute{
 1.School of Computer Science and Technology, Anhui University, Hefei, China
 }
 
-%
-%\titlerunning{Abbreviated paper title}
-% If the paper title is too long for the running head, you can set
-% an abbreviated paper title here
-%
-% \author{First Author\inst{1}\orcidID{0000-1111-2222-3333} \and
-% Second Author\inst{2, 3}\orcidID{1111-2222-3333-4444} \and
-% Third Author\inst{3}\orcidID{2222--3333-4444-5555}}
 % %
-% \authorrunning{F. Author et al. }
 % % First names are abbreviated in the running head. 
 % % If there are more than two authors, 'et al. ' is used. 
 % %
-% \institute{Princeton University, Princeton NJ 08544, USA \and
-% Springer Heidelberg, Tiergartenstr. 17, 69121 Heidelberg, Germany
-% \email{lncs@springer. com}\\
-% \url{http://www. springer. com/gp/computer-science/lncs} \and
-% ABC Institute, Rupert-Karls-University Heidelberg, Heidelberg, Germany\\
-% \email{\{abc, lncs\}@uni-heidelberg. de}}
 
 
 
 
 \maketitle              % typeset the header of the contribution
-%
 % ============================================================
 % 摘要 + 关键词
 % ============================================================
@@ -813,66 +779,6 @@ drift over extended operation.
 \bibliography{myReference}
 \bibliographystyle{splncs04}
 
-% \begin{thebibliography}{8}
-% \bibitem{Harris1988}
-% Harris C, Stephens M. A combined corner and edge detector[C]//Proceedings of the Fourth Alvey Vision Conference. 1988: 147-151.
 
-% \bibitem{Kanade1974}
-% Kanade T. Picture processing system by computer complex and recognition of human faces[D]. Kyoto University, 1974.
 
-% \bibitem{Haralick1992}
-% Haralick R M, Shapiro L G. Computer and robot vision[M]. Addison-Wesley Longman Publishing Co., Inc., 1991.
-
-% \bibitem{Wang2002}
-% Wang L L, Tsai W H. Camera calibration by vanishing lines for 3-D computer vision[J]. IEEE Transactions on Pattern Analysis and Machine Intelligence, 1991, 13(4): 370-376.
-
-% \bibitem{Lucchese2001}
-% Lucchese L, Mitra S K. Using saddle points for subpixel feature detection in camera calibration targets[C]//Asia-Pacific Conference on Circuits and Systems. IEEE, 2002, 2: 191-195.
-
-% \bibitem{VanDeWeijer2006}
-% Van De Weijer J, Gevers T, Smeulders A W M. Robust photometric invariant features from the color tensor[J]. IEEE Transactions on Image Processing, 2005, 15(1): 118-127.
-
-% \bibitem{opencv_checkerboard}
-% Bradski G, Kaehler A. Learning OpenCV: Computer vision with the OpenCV library[J]. Dr. Dobb's Journal of Software Tools, 2000, 2: 78-85.
-
-% \bibitem{ocamcalib2006}
-% Scaramuzza D, Martinelli A, Siegwart R. A toolbox for easily calibrating omnidirectional cameras[C]//2006 IEEE/RSJ International Conference on Intelligent Robots and Systems. IEEE, 2006: 5695-5701.
-
-% \bibitem{bennett2014chess}
-% Bennett S, Lasenby J. ChESS: Quick and robust detection of chess-board features[J]. Computer Vision and Image Understanding, 2014, 118: 197-210.
-
-% \bibitem{hessian1999}
-% Lindeberg T. Feature detection with automatic scale selection[J]. International Journal of Computer Vision, 1998, 30(2): 79-116.
-
-% \bibitem{MATE2016}
-% Donné S, De Vylder J, Goossens B, et al. MATE: Machine learning for adaptive calibration template detection[J]. Sensors, 2016, 16(11): 1858.
-
-% \bibitem{spitschan2018robust}
-% Spitschan B, Ostermann J. Robust Fourier-based checkerboard corner detection for camera calibration[C]//Iberoamerican Congress on Pattern Recognition. Springer, 2018: 538-546.
-
-% \bibitem{Duda2018}
-% Duda A, Frese U. Accurate detection and localization of checkerboard corners for calibration[C]//British Machine Vision Conference (BMVC). 2018: 1-12.
-
-% \bibitem{ma2008robust}
-% Awrangjeb M, Lu G. Robust image corner detection based on the chord-to-point distance accumulation technique[J]. IEEE Transactions on Multimedia, 2008, 10(6): 1059-1072.
-
-% \bibitem{geiger2012automatic}
-% Geiger A, Moosmann F, Car Ö, et al. Automatic camera and range sensor calibration using a single shot[C]//2012 IEEE International Conference on Robotics and Automation. IEEE, 2012: 3936-3943.
-
-% \bibitem{wu2020checkerboard}
-% Wu M, Wu J, Ma S, et al. Checkerboard corner detection based on corner gray distribution feature[J]. Laser Optoelectronics Progress, 2020, 57(10): 109-116.
-
-% \bibitem{bouguet2012camera}
-% Bouguet J Y. Camera calibration toolbox for MATLAB[EB/OL]. 2012. http://www.vision.caltech.edu/bouguetj/calib\_doc/index.html.
-
-% \bibitem{salehi2017tversky}
-% Salehi S S M, Erdogmus D, Gholipour A. Tversky loss function for image segmentation using 3D fully convolutional deep networks[J]. arXiv preprint arXiv:1706.05721, 2017.
-
-% \bibitem{zhang2002flexible}
-% Zhang Z. A flexible new technique for camera calibration[J]. IEEE Transactions on Pattern Analysis and Machine Intelligence, 2000, 22(11): 1330-1334.
-% \end{thebibliography}
-% \begin{thebibliography}{8}
-% \bibitem{ref_lncs1}
-% Yi K, Luo K, Luo X, et al. Ucmctrack: Multi-object tracking with uniform camera motion compensation[C]//Proceedings of the AAAI Conference on Artificial Intelligence. 2024, 38(7): 6702-6710.
-% \end{thebibliography}
 \end{document}
