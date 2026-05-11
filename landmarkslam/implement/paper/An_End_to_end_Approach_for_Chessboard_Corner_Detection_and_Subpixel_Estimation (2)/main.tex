@@ -339,8 +339,14 @@ using the looming effect. As the vehicle approaches a planar road sign, the appa
 size of the sign in the image plane expands. By measuring this expansion across
 consecutive frames and combining it with the inter-frame camera displacement
 obtained from visual odometry, we can compute the absolute depth without any
-prior knowledge of the sign's physical dimensions.
-
+prior knowledge of the sign's physical dimensions. The geometric relationships
+among the sign position, camera motion, and image expansion are illustrated in
+Fig.~\ref{fig:looming_geo}.\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.7\textwidth]{images/3.1.png}
+    \caption{Geometric illustration of looming-based depth recovery.}
+    \label{fig:looming_geo}
+\end{figure}
 Let $\mathbf{P}_{\text{near}} = (u_{\text{near}}, v_{\text{near}})$ and
 $\mathbf{P}_{\text{far}} = (u_{\text{far}}, v_{\text{far}})$ denote the center
 pixel coordinates of the road sign in two frames separated by a known baseline.

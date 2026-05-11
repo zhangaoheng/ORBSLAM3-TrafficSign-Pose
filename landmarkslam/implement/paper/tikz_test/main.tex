@@ -1,0 +1,186 @@
+\documentclass{article}
+
+% --- 基本排版 ---
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}    % 数学公式
+\usepackage{amssymb}
+
+% --- 核心绘图库 TikZ ---
+\usepackage{tikz}
+\usetikzlibrary{calc, positioning, shapes.geometric, shapes.symbols, arrows.meta}
+
+\begin{document}
+
+\section{Looming Geometry Diagram (TikZ Test)}
+
+\begin{center}
+\begin{tikzpicture}[
+    % 1. 定义全局样式
+    % 框样式
+    box/.style={draw, rectangle, minimum width=2.5cm, minimum height=1.5cm, inner sep=1.5mm, outer sep=0pt, thin, fill=white},
+    imagebox/.style={box, minimum width=4cm, minimum height=3cm},
+    databox/.style={box, fill=gray!10, minimum width=4cm, minimum height=3cm},
+    % 点样式
+    dot_far/.style={circle, fill=red, inner sep=1.2pt, label=below:{\footnotesize $P_{far}$}},
+    dot_near/.style={circle, fill=blue, inner sep=1.2pt, label=below:{\footnotesize $P_{near}$}},
+    foe/.style={star, star points=6, fill=green!70!black, inner sep=0.8pt, label=below:{\footnotesize FOE}},
+    % 箭头样式
+    arr/.style={-{Stealth[scale=1.0]}, thick},
+    dashed_arr/.style={arr, dashed, gray!70},
+    % 大流程箭头（简化版）
+    big_arr/.style={-{Triangle[scale=1.5]}, line width=1.5mm, gray!30},
+    % 摄像机简化 Pic
+    camera_symbol/.pic={
+        \draw[thick] (0,0) -- (0,0.4) -- (-0.1,0.5) -- (0.5,0.5) -- (0.6,0.4) -- (0.6,0) -- cycle;
+        \fill[white] (0.05,0.05) rectangle (0.55,0.35);
+        \draw[thick, -{Stealth[scale=0.8]}] (0.3,0.35) -- (0.3,1.2);
+    }
+]
+
+% =========================================================
+% 第 2 步：放置复杂图标
+% =========================================================
+% 建议：准备两个高分辨率的 PDF/SVG 矢量文件
+% 例如：car_symbol.pdf, traffic_sign.pdf。
+
+% 汽车图标（左上角）
+\node (car_icon) at (-6, 3) {
+    \includegraphics[width=1.2cm]{car_symbol.pdf} % <--- 您的文件路径
+};
+
+% 交通标志（右上角）
+\node (sign_icon) at (6, 3) {
+    \includegraphics[width=1.2cm]{traffic_sign.pdf} % <--- 您的文件路径
+};
+
+% =========================================================
+% 第 3 步：绘制顶部物理场景
+% =========================================================
+\pic[rotate=-90] (cfar_pic) at (-3, 3) {camera_symbol};
+\node (cfar) [anchor=center, outer sep=0pt] at (-3, 3) {};
+\node (cfar_label) [below] at (cfar.south) {\footnotesize $C_{far}$};
+
+\pic[rotate=-90] (cnear_pic) at (2, 3) {camera_symbol};
+\node (cnear) [anchor=center, outer sep=0pt] at (2, 3) {};
+\node (cnear_label) [below] at (cnear.south) {\footnotesize $C_{near}$};
+
+% 顶部箭头和引用
+\draw [arr] (cfar.north) -- (cnear.north) node [midway, above] {\footnotesize};
+\node at ($(sign_icon.north east)+(-1, 0)$) {\footnotesize};
+
+% =========================================================
+% 第 4 步：绘制中部流程（有序排列，移除混乱遮挡）
+% =========================================================
+
+% Titles
+\node at (-3.5, 1.3) {\footnotesize Step 1};
+\node at (2.5, 1.3) {\footnotesize Step 3};
+
+% Step 1 (画像的处理程) 框
+\node (step1_img) [imagebox] at (-3.5, -1) {
+    \begin{tikzpicture}
+        \node (pfar) [dot_far, label=left:{\footnotesize $P_{far}$}] at (0,0) {};
+        % 绘制旋转弧线
+        \draw[arr, rotate=30, -{Stealth[scale=0.8]}] (pfar) arc (210:330:1.5cm);
+        % 放置 derotated 点和 Pnear
+        \node (pfardd) [dot_far, label=right:{\footnotesize $P_{far\_derot}$}] at (2, -0.3) {};
+        \node (pn_s1) [dot_near, label=right:{\footnotesize $P_{near}$}] at (2, -0.8) {};
+        % 绘制旋转符号本身（一个带有旋转箭头的弧）
+        \draw[thick, arr, -{Stealth[scale=0.8]}] (-0.5,-0.2) arc (20:-160:0.3) -- +(-0.1, 0.1);
+    \end{tikzpicture}
+};
+\node at (step1_img.south west) [above right] {\footnotesize};
+
+% Step 1 结果点标签引用
+\node at ($(step1_img.south east)+(-1.2, 0.2)$) {\footnotesize};
+\node at ($(step1_img.south east)+(-1.2, -0.2)$) {\footnotesize};
+
+
+% Step 3 (2D 平面测量) 框 (databox 样式)
+\node (step3_img) [databox] at (3.5, -1) {
+    \begin{tikzpicture}
+        \coordinate (foe_point) at (0,0);
+        \node (foe) [foe] at (foe_point) {};
+
+        \node (pn_s3) [dot_near, label=left:{\footnotesize $P_{near}$}] at ($(foe_point)+(-1,0.2)$) {};
+        \node (pfd_s3) [dot_far, label=right:{\footnotesize $P_{far\_derot}$}] at ($(foe_point)+(1.2,0.6)$) {};
+
+        % 绘制光流三角形和距离标签
+        \draw (foe) -- (pn_s3) node [midway, below] {\footnotesize $r_{near}$};
+        \draw (foe) -- (pfd_s3) node [midway, below] {\footnotesize $r_{far}$};
+        \draw (pn_s3) -- (pfd_s3) node [midway, right=1.5mm] {\footnotesize $dr$};
+    \end{tikzpicture}
+};
+\node at (step3_img.south east) [above left] {\footnotesize};
+
+% 引用和大箭头
+\node at ($(cnear.south)+(-0.5,-0.2)$) {\footnotesize};
+\draw [big_arr] ($(step1_img.east)+(0,0)$) -- ($(step3_img.west)+(-0.1,0.2)$);
+
+% =========================================================
+% 第 5 步：绘制底部几何度復（几何体精确，移除混乱）
+% =========================================================
+% 重置坐标系
+\coordinate (C_far_floor) at (-6, -6);
+\coordinate (C_near_floor) at (-2, -6);
+
+\pic[rotate=-90] (cfar_fl_pic) at (C_far_floor) {camera_symbol};
+\node (cf_floor) [anchor=center, outer sep=0pt] at (C_far_floor) {};
+\node [below] at (cf_floor.south) {\footnotesize $C_{far}$};
+
+\pic[rotate=-90] (cnear_fl_pic) at (C_near_floor) {camera_symbol};
+\node (cn_floor) [anchor=center, outer sep=0pt] at (C_near_floor) {};
+\node [below] at (cn_floor.south) {\footnotesize $C_{near}$};
+
+
+% 几何投影结构（核心：投影和平面清晰）
+\begin{scope}[outer sep=0pt]
+    % 绘制投影圆锥和平面（使用 gray!20 填充填充透明度）
+    % FOE 投影路径
+    \draw [thick] (cf_floor) -- +(10, 0);
+
+    % 定义投影平面
+    \coordinate (plane) at ($(cn_floor)+(8,0)$);
+
+    % 绘制投影圆锥体（使用填充）
+    \coordinate (cone_top) at ($(plane)+(1.2, 1.8)$);
+    \coordinate (cone_bottom) at ($(plane)+(-0.8, -0.6)$);
+    \fill [gray!20, fill opacity=0.7] (cn_floor.center) -- (cone_top) -- (cone_bottom) -- cycle;
+    \draw [arr, thin] (cn_floor.center) -- (cone_top);
+    \draw [arr, thin] (cn_floor.center) -- (cone_bottom);
+
+    % 在平面上绘制 Pnear 和 Pfar_derot
+    \node (p_near_dot) [dot_near, label=right:{\footnotesize $P_{near}$}] at ($(plane)+(0.2,1.3)$) {};
+    \node (p_far_dot) [dot_far, label=right:{\footnotesize $P_{far\_derot}$}] at ($(plane)+(0.2,-0.4)$) {};
+
+    % r_near 和 dr 标签
+    \draw [thick, <->] ($(p_near_dot.west)+(-0.2,0)$) -- ($(p_far_dot.west)+(-0.2,0)$) node [midway, left] {\footnotesize $dr$};
+    \draw [thick, <->] ($(cn_floor.north)+(0,0)$) -- ($(p_near_dot.center)-(0,0)$);
+    % 使用坐标计算标签
+    \coordinate (r_near_label_pos) at ($(cn_floor.north)!0.5!(p_near_dot.center)$);
+    \node [below=2pt] at (r_near_label_pos) {\footnotesize $r_{near}$};
+\end{scope}
+
+% Z_loom 公式
+\node at (0.5, -4.7) [font=\footnotesize] {$Z_{\text{loom}} = \dfrac{r_{\text{near}} \cdot \Delta d}{dr} - \Delta d$};
+
+% \Delta d 引用标签和引用
+\node at ($(cf_floor.center)!0.5!(cn_floor.center)+(-1, -1)$) {\footnotesize $(\Delta d + Z_{loom})$};
+
+% =========================================================
+% 第 6 步：绘制连接不同面板的大箭头和虚线
+% =========================================================
+
+% 大流程箭头
+\draw [big_arr] (cfar.south) -- (step1_img.north);
+\draw [big_arr] (step1_img.south) -- (cf_floor.north);
+\draw [big_arr] (step3_img.south) -- ($(p_far_dot.center)+(-1, 0.2)$);
+
+% 虚线连接（从物理摄像机到图像平面）
+\draw [dashed_arr] (cfar.south west) -- (step1_img.north west);
+\draw [dashed_arr] (cnear.south west) -- (step3_img.north west);
+
+\end{tikzpicture}
+\end{center}
+
+\end{document}
