@@ -74,16 +74,20 @@ FRAME_STEP = config['Algorithm']['frame_step']
 import matplotlib
 import matplotlib.font_manager as _fm
 import matplotlib.pyplot as _plt
-_CN_FONT_PATH = os.path.expanduser("~/.fonts/NotoSansSC-Regular.ttf")
-if os.path.exists(_CN_FONT_PATH):
-    try:
-        _fm.fontManager.addfont(_CN_FONT_PATH)
-        _cn_prop = _fm.FontProperties(fname=_CN_FONT_PATH)
-        _cn_font_name = _cn_prop.get_name()
-        _plt.rcParams['font.family'] = _cn_font_name
-        _plt.rcParams['axes.unicode_minus'] = False
-    except Exception:
-        pass
+for _p in [
+    os.path.expanduser("~/.fonts/msyh.ttc"),
+    "/usr/share/fonts/msyh.ttc",
+    os.path.expanduser("~/.fonts/NotoSansCJK-Regular.ttc"),
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+]:
+    if os.path.exists(_p):
+        try:
+            _fm.fontManager.addfont(_p)
+            _plt.rcParams['font.family'] = _fm.FontProperties(fname=_p).get_name()
+            _plt.rcParams['axes.unicode_minus'] = False
+        except Exception:
+            pass
+        break
 
 # ==============================================================================
 # 🌟 模块 0：平面参数估计（从角点+深度推算 n 和 d）
