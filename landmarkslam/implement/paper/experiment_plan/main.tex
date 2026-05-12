@@ -1,0 +1,246 @@
+\documentclass{article}
+\usepackage{amsmath, amssymb}
+\usepackage{geometry, booktabs}
+\geometry{a4paper, margin=2cm}
+\usepackage{CJKutf8}
+\usepackage[hidelinks]{hyperref}
+
+\title{实验设计方案}
+\author{Aoheng Zhang}
+\date{}
+
+\begin{document}
+
+\begin{CJK}{UTF8}{gbsn}
+\maketitle
+
+\section{实验目的}
+
+论文的核心 claims 有三个，每个 claim 需要一个独立的实验验证：
+
+\begin{enumerate}
+    \item Looming 深度恢复可以提供绝对度量深度，无需已知目标物理尺寸
+    \item 路牌在天气/光照变化下仍然可重识别，而传统 BoW 方法失效
+    \item 尺度注入（Looming + Homography）可以恢复正确的度量位姿
+\end{enumerate}
+
+\section{数据采集}
+
+\subsection{硬件设备}
+
+\begin{itemize}
+    \item \textbf{相机}：Intel RealSense D456，RGB 和 Depth 流同步输出，分辨率 848$\times$480，30~FPS
+    \item \textbf{卫星定位}：RTK-GNSS 模块（如 Ublox F9P 或 NovAtel），输出厘米级经纬度，作为车辆轨迹的绝对真值
+    \item \textbf{惯导}：IMU（RealSense 内置或外接），用于辅助定位
+    \item \textbf{数据同步}：RTK-GNSS 时间戳与相机帧时间戳对齐（使用 ROS bag 或自定义同步机制）
+\end{itemize}
+
+\subsection{每次采集检查清单}
+
+\begin{itemize}
+    \item 确认 RGB 和 depth 流正常
+    \item 确认 RTK-GPS 处于固定解（Fix）状态，精度优于 5~cm
+    \item 行驶路径：笔直道路靠近路牌（20\,m $\rightarrow$ 5\,m）
+    \item 记录天气条件：\textbf{晴天 / 阴天 / 夜间 / 雨天 / 雾天}
+    \item 同一路牌至少 2 次不同时间的遍历（建图 + 重定位）
+    \item 路牌类型：限速牌、指示牌、警告牌等，至少 3-5 个
+\end{itemize}
+
+\subsection{室内 vs 室外实验策略}
+
+由于 RealSense D456 的深度相机有效量程仅为 0.6--6\,m，在室外远距离场景（5--25\,m）下深度图完全失效，无法作为深度真值。因此采取分场景验证策略：
+
+\begin{itemize}
+    \item \textbf{室内环境}：depth 真值有效，验证 Looming 深度恢复算法的精度
+    \item \textbf{室外环境}：深度图不可靠，不验证深度精度，改为验证回环校正的最终效果（以 RTK-GPS 为轨迹真值）
+\end{itemize}
+
+\subsection{轨迹真值}
+
+室外实验中，RTK-GNSS/INS 组合导航提供厘米级绝对位置，数据插值为图像帧时间戳下的位姿，作为轨迹误差计算的参考基准。
+
+\subsection{数据目录结构}
+
+每段采集的原始数据组织结构如下：
+
+\begin{verbatim}
+data/experiment_sign01/
+├── sunny_run1/              # 建图：晴天
+│   ├── rgb/                 # RGB PNG, 848x480
+│   ├── depth/               # 深度 PNG, 16-bit mm
+│   ├── camera_intrinsics.json
+│   ├── associations.txt
+│   ├── trajectory.txt       # ORB-SLAM3 输出
+│   └── gps_trajectory.txt   # RTK-GPS 真值轨迹 (TUM 格式，时间戳 tx ty tz qx qy qz qw)
+├── night_run1/              # 重定位：夜间
+│   └── ...
+└── rainy_run1/              # 重定位：雨天
+    └── ...
+\end{verbatim}
+
+\subsection{数据处理流程}
+
+每一段原始数据经过以下处理才能用于实验：
+
+\begin{enumerate}
+    \item 运行 ORB-SLAM3 RGB-D 模式，输出 \texttt{AllFrames\_trajectory.txt}
+    \item 将 RTK-GPS 数据插值为图像帧时间戳下的位姿，输出 \texttt{gps\_trajectory.txt}（TUM 格式）
+    \item 提取 ROI 标注（process\_sequence\_with\_cached\_rois）
+    \item 整理为 config.yaml 格式供 test.py 读取
+    \item 运行 batch\_evaluate\_looming() 输出统计结果
+\end{enumerate}
+
+\clearpage
+
+\section{实验一：Looming 深度精度验证（室内）}
+
+\subsection{目的}
+在室内受控环境下验证 Z\textsubscript{loom} 与深度图真值 Z\textsubscript{gt} 的一致性。
+
+\subsection{方法}
+在室内架设 planar target（如棋盘格或路牌打印板），
+使用 RealSense D456 从远到近靠近目标（约 4\,m $\rightarrow$ 0.5\,m），
+确保全程在 depth 有效量程内。
+运行 \texttt{python test.py -q}，遍历所有连续帧对（步长 N\textsubscript{step}=15），
+逐帧计算 Z\textsubscript{loom} 并与对齐的 depth 通道中提取的深度真值对比。
+
+\subsection{评估指标}
+
+\begin{align*}
+\text{MAE} &= \frac{1}{N}\sum |Z_{\text{loom}} - Z_{\text{gt}}| \\
+\text{RMSE} &= \sqrt{\frac{1}{N}\sum (Z_{\text{loom}} - Z_{\text{gt}})^2} \\
+\text{Median} &= \text{median}(|Z_{\text{loom}} - Z_{\text{gt}}|) \\
+\text{RelErr} &= \frac{|Z_{\text{loom}} - Z_{\text{gt}}|}{Z_{\text{gt}}} \times 100\%
+\end{align*}
+
+\subsection{结果呈现}
+
+\begin{itemize}
+    \item 汇总表格：MAE, RMSE, Median, Std, 相对误差, <5cm/10cm/20cm 占比
+    \item Bland-Altman 图：横轴为 (Z\textsubscript{gt} + Z\textsubscript{loom})/2，纵轴为差值
+\end{itemize}
+
+\subsection{所需数据量}
+3 组不同距离的室内序列，每组至少 30 个有效帧对。
+
+\vspace{0.5cm}
+\hrule
+
+\section{实验二：路牌重识别鲁棒性对比}
+
+\subsection{目的}
+证明在光照/天气变化条件下，路牌重识别比传统 BoW 回环更可靠。
+
+\subsection{对比方法}
+
+\begin{tabular}{ll}
+\toprule
+方法 & 说明 \\
+\midrule
+BoW (ORB-SLAM3) & 传统词袋回环检测 \\
+本文方法 (LoFTR) & 路牌区域 LoFTR 特征匹配 \\
+本文方法 (LSD + LoFTR) & 完整管线 \\
+\bottomrule
+\end{tabular}
+
+\subsection{评估指标}
+
+\begin{itemize}
+    \item Precision：匹配正确的路牌数 / 所有检测到的路牌数
+    \item Recall：匹配正确的路牌数 / 所有应匹配的路牌数
+    \item F1-score：2 $\times$ Precision $\times$ Recall / (Precision + Recall)
+\end{itemize}
+
+\subsection{测试条件}
+
+\begin{tabular}{ll}
+\toprule
+条件 & 描述 \\
+\midrule
+正常 → 正常 & 建图和重定位都在晴天 \\
+正常 → 夜间 & 建图晴天，重定位夜间 \\
+正常 → 雨天 & 建图晴天，重定位雨天 \\
+正常 → 雾天 & 建图晴天，重定位雾天（可选） \\
+\bottomrule
+\end{tabular}
+
+\subsection{所需数据量}
+每种条件至少 10 个路牌-帧对。
+
+\vspace{0.5cm}
+\hrule
+
+\section{实验三：轨迹校正效果验证（室外）}
+
+\subsection{目的}
+验证路牌回环校正后，车辆轨迹误差相比纯 ORB-SLAM3 是否有显著降低。
+
+\subsection{方法}
+
+\begin{enumerate}
+    \item 采集车辆行驶序列（含路牌），同时记录 RTK-GPS 作为轨迹真值
+    \item 运行 ORB-SLAM3 得到原始轨迹
+    \item 当车辆经过路牌时，使用本文方法计算路牌度量位姿
+    \item 将路牌位姿作为绝对约束注入位姿图，校正轨迹
+    \item 对比校正前后轨迹与 RTK-GPS 真值的误差
+\end{enumerate}
+
+\subsection{评估指标}
+
+\begin{align*}
+\text{ATE} &= \sqrt{\frac{1}{M}\sum \| \mathbf{t}_{\text{est}} - \mathbf{t}_{\text{RTK}} \|^2} \\
+\text{RPE} &= \frac{1}{M}\sum \| \log(\mathbf{T}_{\text{est}}^{-1} \cdot \mathbf{T}_{\text{RTK}}) \| \\
+\text{Drift reduction} &= \frac{\text{ATE}_{\text{校正前}} - \text{ATE}_{\text{校正后}}}{\text{ATE}_{\text{校正前}}} \times 100\%
+\end{align*}
+
+\subsection{对比基线}
+
+\begin{itemize}
+    \item ORB-SLAM3 原始轨迹（无回环校正）
+    \item ORB-SLAM3 + 传统 BoW 回环校正
+    \item 本文方法（路牌回环校正）
+\end{itemize}
+
+\subsection{所需数据量}
+至少 5 段室外行驶序列，每段至少经过 2 个路牌。
+
+\vspace{0.5cm}
+\hrule
+
+\section{实验四：多帧联合优化效果（可选）}
+
+\subsection{目的}
+验证 multi-frame joint optimization 相比例帧方法是否有提升。
+
+\subsection{方法}
+
+\begin{itemize}
+    \item 比例帧：仅使用一对 far-near 帧计算位姿
+    \item 多帧：使用 5-10 帧序列做 joint optimization
+\end{itemize}
+
+对比两者的位姿误差。
+
+\vspace{0.5cm}
+\hrule
+
+\section{实验进度表}
+
+\begin{tabular}{lll}
+\toprule
+阶段 & 内容 & 预计时间 \\
+\midrule
+1 & 补充采集数据（夜间、雨天、不同路牌） & 1-2 天 \\
+2 & 跑通 test.py -q 批处理 & 1 天 \\
+3 & 整理 batch\_results.json 填入论文表格 & 1 天 \\
+4 & 补充 LoFTR 重识别对比实验 & 1-2 天 \\
+5 & 补充位姿精度对比实验 & 1-2 天 \\
+6 & 绘制图表、撰写 Results 部分 & 2-3 天 \\
+\bottomrule
+\end{tabular}
+
+\vspace{1cm}
+\noindent\textbf{总计时长：约 7-11 天}
+
+\end{CJK}
+\end{document}
