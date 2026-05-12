@@ -6,8 +6,8 @@
 确保摄像头帧和 GPS 数据严格时间戳对齐。
 
 用法:
-  python collect_data.py --name sunny_run1 --gps-port /dev/ttyACM0
-  python collect_data.py --name night_run1 --gps-port /dev/ttyUSB0 --baud 9600
+  python collect_data.py --name sunny_run1
+  python collect_data.py --name night_run1 --gps-baud 115200
 
 输出目录结构:
   data/采集名称/
@@ -40,6 +40,13 @@ import struct
 import cv2
 import numpy as np
 
+# Windows GBK 终端兼容：确保 emoji 能正常打印
+if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 # ==============================================================================
 # GPS 读取线程
 # ==============================================================================
@@ -47,9 +54,10 @@ class GPSReader(threading.Thread):
     """后台线程：持续读取 GPS 串口数据，解析 NMEA 语句"""
 
     GPS_PORTS = ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB0",
-                  "/dev/ttyUSB1", "/dev/ttyS0", "/dev/ttyS1"]
+                  "/dev/ttyUSB1", "/dev/ttyS0", "/dev/ttyS1",
+                  "COM1", "COM2", "COM3", "COM4", "COM5", "COM6"]
 
-    def __init__(self, port=None, baudrate=115200, timeout=0.05):
+    def __init__(self, port=None, baudrate=9600, timeout=0.05):
         super().__init__(daemon=True)
         self.port = port
         self.baudrate = baudrate
@@ -65,18 +73,42 @@ class GPSReader(threading.Thread):
 
     @staticmethod
     def _find_available_port(preferred=None):
-        """自动扫描可用串口"""
-        import glob
+        """自动扫描可用串口（Windows / Linux 通用）"""
         # 如果指定了端口且存在，直接用
-        if preferred and os.path.exists(preferred):
-            return preferred
-        # 扫描已知端口模式
-        patterns = ["/dev/ttyACM*", "/dev/ttyUSB*", "/dev/ttyS[0-9]"]
+        if preferred:
+            if os.path.exists(preferred):
+                return preferred
+            # Windows COM 口不带路径，用 serial 检测
+            if sys.platform == "win32" and preferred.startswith("COM"):
+                import serial
+                try:
+                    s = serial.Serial(preferred, timeout=0.1)
+                    s.close()
+                    return preferred
+                except:
+                    pass
+
+        # 用 pyserial 扫描所有可用串口
+        try:
+            import serial.tools.list_ports
+            ports = list(serial.tools.list_ports.comports())
+            for p in ports:
+                dev = p.device
+                if dev not in ("COM1",):  # 跳过通常无 GPS 的 COM1
+                    return dev
+        except Exception:
+            pass
+
+        # 回退：Linux glob 扫描
+        import glob
+        patterns = ["/dev/ttyACM*", "/dev/ttyUSB*", "/dev/ttyS[0-9]",
+                     "/dev/ttyTHS*", "/dev/ttyAMA*"]
         for pat in patterns:
             matches = sorted(glob.glob(pat))
             if matches:
                 return matches[0]
-        return preferred or "/dev/ttyACM0"
+
+        return preferred or ("COM3" if sys.platform == "win32" else "/dev/ttyACM0")
 
     def _connect(self):
         """尝试打开串口（自动检测可用串口）"""
@@ -146,14 +178,14 @@ class GPSReader(threading.Thread):
                 fix = int(fix_q)
 
                 # 将 UTC 时间(HHMMSS.SS)转为 Unix 微秒
-                now = datetime.datetime.utcnow()
+                now = datetime.datetime.now(datetime.timezone.utc)
                 h = int(utc_str[:2])
                 m = int(utc_str[2:4])
                 s = float(utc_str[4:])
                 us = int(s * 1e6) % 1000000
                 unix_us = int((
                     now.replace(hour=h, minute=m, second=int(s),
-                               microsecond=us) - datetime.datetime(1970, 1, 1)
+                               microsecond=us) - datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
                 ).total_seconds() * 1e6)
 
                 entry = (unix_us, lat, lon, alt, fix)
@@ -244,7 +276,7 @@ def format_timestamp(us):
 # 主录制逻辑
 # ==============================================================================
 class DataCollector:
-    def __init__(self, output_dir, gps_port="/dev/ttyACM0", gps_baud=115200):
+    def __init__(self, output_dir, gps_port="/dev/ttyACM0", gps_baud=9600):
         self.output_dir = output_dir
         self.rgb_dir = os.path.join(output_dir, "rgb")
         self.depth_dir = os.path.join(output_dir, "depth")
@@ -356,11 +388,10 @@ class DataCollector:
             print("   注意: WSL 中需要 usbipd-win 透传 USB 设备")
             return
 
-        # ---- 检查 WSL USB 设备 ----
-        has_video = os.path.isdir("/dev") and any(
+        # ---- 检查 WSL USB 设备（仅 Linux/WSL）----
+        if sys.platform == "linux" and not (os.path.isdir("/dev") and any(
             f.startswith("video") for f in os.listdir("/dev")
-        )
-        if not has_video:
+        )):
             self._print_wsl_setup_guide()
             return
 
@@ -553,28 +584,28 @@ if __name__ == "__main__":
                         help="输出根目录（默认: data/deepseek/）")
     parser.add_argument("--gps-port", "-p", default="/dev/ttyACM0",
                         help="GPS 串口（默认: /dev/ttyACM0）")
-    parser.add_argument("--gps-baud", "-b", type=int, default=115200,
-                        help="GPS 波特率（默认: 115200）")
+    parser.add_argument("--gps-baud", "-b", type=int, default=9600,
+                        help="GPS 波特率（默认: 9600）")
     args = parser.parse_args()
 
-    # 输出路径
+    # 输出路径：默认保存在脚本所在目录的 data/ 下
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    if args.out:
-        root_dir = args.out
-    else:
-        # data/deepseek/ 相对于 landmarkslam/implement/
-        impl_dir = os.path.dirname(script_dir)
-        root_dir = os.path.join(impl_dir, "data", "deepseek")
+    root_dir = args.out or os.path.join(script_dir, "data")
 
     output_dir = os.path.join(root_dir, args.name)
     if os.path.exists(output_dir):
-        print(f"⚠️  目录已存在: {output_dir}")
-        reply = input("   覆盖? (y/n): ").strip().lower()
-        if reply != 'y':
-            print("  退出")
-            sys.exit(0)
-        import shutil
-        shutil.rmtree(output_dir)
+        if not sys.stdin.isatty():
+            print(f"⚠️  目录已存在，自动覆盖: {output_dir}")
+            import shutil
+            shutil.rmtree(output_dir)
+        else:
+            print(f"⚠️  目录已存在: {output_dir}")
+            reply = input("   覆盖? (y/n): ").strip().lower()
+            if reply != 'y':
+                print("  退出")
+                sys.exit(0)
+            import shutil
+            shutil.rmtree(output_dir)
 
     collector = DataCollector(
         output_dir=output_dir,
