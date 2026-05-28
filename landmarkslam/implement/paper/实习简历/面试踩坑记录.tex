@@ -1,0 +1,424 @@
+% !TEX program = xelatex
+% ============================================================
+% 面试口播脚本 + 踩坑记录
+% 结构：每个项目 = 口播脚本 + 踩坑记录
+% 口播脚本 → 面试自我介绍用，覆盖项目全流程
+% 踩坑记录 → 面试官追问技术细节时用，每个坑按 现象→排查→根因→解决→效果
+% ============================================================
+
+\documentclass[11pt,a4paper]{article}
+\usepackage[slantfont,boldfont]{xeCJK}
+\usepackage{xcolor}
+\usepackage{geometry}
+\geometry{a4paper, margin=2cm}
+\setmainfont{DejaVu Serif}
+\setCJKmainfont{AR PL SungtiL GB}
+\setCJKsansfont{AR PL SungtiL GB}
+\usepackage{listings}
+
+\begin{document}
+
+\section*{面试准备：项目口播脚本与踩坑记录}
+
+% ============================================================
+% 项目一：自主路线规划数据采集无人机
+% ============================================================
+\subsection*{项目一：自主路线规划数据采集无人机}
+
+\textbf{口播脚本}
+
+（面试官你好，我来讲一下这个无人机数据采集的项目。）
+
+这个项目的背景是这样的：实验室需要采集一批带有位置信息的图像数据来做后续的算法研究。如果用纯手动的飞控控制去飞，那效率太低，而且飞行轨迹每次都不一致，后期数据也不好对齐。所以我们当时的想法是，能不能做一台无人机，它可以按照预设的路线自动飞行，同时在飞行过程中把相机拍摄的图像和对应的时间戳、位姿信息全部自动存下来。这样飞一趟下来，数据就采集完了，不需要人工干预。
+
+我的角色是整机系统的搭建、软件的部署和整合，就是一个人从头到尾把这个无人机做出来，让它能真正飞起来并且采到可用的数据。
+
+我先说硬件方面：整机的采购和组装是我来主导的，和采购部门对接，按照需求清单去选型、采购核心硬件。计算平台用的是\textbf{树莓派 5}，相机是 \textbf{Intel RealSense D435i}，飞控是 Pixhawk，机架和动力系统也是自己装的。这里有一个很实际的坑——树莓派 5 用的是 ARM 架构的芯片，而 Ubuntu、ROS 和 RealSense 的官方驱动全都是倾向于 x86 平台的。虽然 Ubuntu 有 ARM 版，但很多依赖的预编译包是没有的，所以在 ARM 上要从源码编译很多东西。
+
+这里我花了比较多的时间去解决跨平台的依赖冲突。比如 librealsense 驱动，在 ARM 上直接编译会报架构不支持的错误，我后来查了 Intel 官方其实提供了 ARM64 的 apt 源，用预编译的 deb 包装就快很多，而且它自带了 DSP 加速，深度图的解码速度反而比自编译的版本快了大概 20\%。
+
+好，硬件和驱动搞定之后，最核心的工作其实是\textbf{把 ORB-SLAM3 跑在树莓派 5 上}。ORB-SLAM3 本身是为了 PC 端设计的，它对算力的要求是比较高的，直接移植到树莓派上会非常卡。我当时测试的情况是，默认参数下整个系统跑起来只有 3 到 5 帧每秒，而且 CPU 长期在 95\% 以上，树莓派很快就触发温控降频了，基本上没法用。
+
+所以我对 ORB-SLAM3 的源码做了一系列的裁剪。第一步，我关掉了全局回环检测线程（在配置文件中加了一行 \texttt{loopClosing: 0}，System.cc 第 102 到 107 行会读取这个参数，控制 LoopClosing 线程的 \texttt{mbActiveLC} 标志位，设为 false 后 LoopClosing::NewDetectCommonRegions 在第 327 行直接 return false，整个回环检测和地图融合都被跳过）。因为我们的需求是实时采集位姿数据、不需要做长时间的全局优化，而且回环检测本身要持续地检索关键帧数据库，很耗 CPU，关掉之后直接就释放了一个核的负载。第二步，我把单帧的特征点提取上限从默认的 1000 降到了 400（在 YAML 配置文件中将 \texttt{ORBextractor.nFeatures} 从 1000 改为 400，Tracking.cc 第 1220 到 1226 行在初始化时会读取这个值传给 ORBextractor 构造函数）。因为无人机低速飞行的场景下，400 个特征点已经足够支撑帧间匹配了。第三步，我收紧局部 BA 的共视图范围（改了两个地方：一是 LocalMapping.cc 第 391 行将三角化邻居数 \texttt{nn} 从 10 改为 5；二是 Optimizer.cc 第 1125 行将 \texttt{GetVectorCovisibleKeyFrames()} 改为 \texttt{GetBestCovisibilityKeyFrames(10)}，限制参与局部 BA 的关键帧从全部共视帧缩减为只取权重最高的 10 帧）。这样参与优化的关键帧数量就变少了，每帧的优化耗时大幅降低。
+
+经过这几步裁剪之后，系统的帧率从 3 到 5 帧提升到了 12 到 15 帧，CPU 负载从 95\% 降到了 70\% 左右。这个性能对于无人机在低速飞行场景下获取实时位姿来说是够用的。
+
+帧率和 CPU 的问题解决之后，下一步是把 ORB-SLAM3 算出来的位姿和飞控对接起来，实现自主飞行控制。我写了一个 ROS 节点，订阅 ORB-SLAM3 发布的相机位姿话题，通过 MAVROS 实时向 Pixhawk 飞控发送位置控制指令。因为 MAVROS 把 PX4 的底层协议封装成了 ROS 的 Topic 和 Service，所以我在 ROS 层面只需要发 Setpoint（就是目标位置），飞控自己去做底层的姿态解算和电机控制。
+
+飞行逻辑是这样一个流程：无人机先自主起飞到指定高度，然后按照预设的路径点依次循迹飞行，同时在飞行过程中全自动地录制 rosbag，把 RGB 图像、深度图、IMU 数据、还有 ORB-SLAM3 的位姿全都存下来。飞完预设的路径之后，自动返航降落。整个过程不需要人在遥控器上做任何操作。
+
+最终这个项目实现了全自动飞行数据采集。这个项目对我的锻炼还是挺大的，从采购硬件开始，到装机、驱动调试、算法裁剪、ROS 集成，最后实际飞起来采到数据，整个过程走了一遍，对嵌入式平台上的 SLAM 算法部署有了比较深的理解。
+
+（以上就是这个项目的大致情况。\ ）
+
+\vspace{1em}
+\noindent\textbf{踩坑记录}
+
+（此项目的踩坑记录待补充，实际调试主要围绕 librealsense ARM 编译、USB 供电掉线、PCL 算力瓶颈等问题展开，可参考项目二坑 2/3/4 的同类经验。此处就不再重复写了。\ ）
+
+% ============================================================
+% 项目二：ROS 2 多模态感知导航系统
+% ============================================================
+\subsection*{项目二：ROS 2 多模态感知导航系统}
+
+\textbf{口播脚本}
+
+（面试官你好，我来介绍第二个项目，一个基于 ROS 2 的移动底盘导航系统。）
+
+这个项目的初衷是这样的：实验室有一个单线激光雷达的底盘，只有 RPLIDAR A2。你会发现它在导航的时候有一个很明显的盲区——它只能扫固定高度平面的障碍物。比如说桌角、椅子横梁、或者悬空的货架层板，这些东西激光扫不到，导航的时候就容易撞上去。所以我们就想，能不能加一个深度相机，把雷达的盲区补上，让小车在室内复杂环境里真正能稳定地自主导航。
+
+我负责的是整个系统的搭建，从底盘的硬件组装和走线开始，到传感器驱动调试、算法部署、参数调优，到最后实际跑起来。
+
+先讲定位建图这一块。底盘有编码器和六轴 IMU（MPU6050），但编码器在瓷砖地面上容易打滑，IMU 有零漂，单独用哪个都不准。所以我用了 \texttt{robot\_localization} 框架里的 EKF，把编码器的里程计和 IMU 的角速度、加速度做融合，生成一个高频平滑的局部里程计。这个里程计不直接作为全局定位用，而是作为运动先验喂给 Cartographer。Cartographer 拿到这个先验之后，把每一帧激光数据和子图做匹配，跑 Ceres 优化，同时开启回环检测。回环一旦触发，Cartographer 会发布一个 map→odom 的变换来修正 odom 坐标系里积累的漂移。这里有一个关键的设计：EKF 和 Cartographer 之间是单向解耦的，EKF 只管出局部位姿，Cartographer 只管修全局坐标，不会出现循环依赖的问题。
+
+接下来是避障的部分，这也是这个项目的核心工作。RPLIDAR A2 只能扫固定高度嘛，那桌角这种悬空障碍物是漏检的。我的做法是，把 RealSense D435i 的深度图点云通过 PCL 处理之后，注入到 Nav2 的体素层里面。这里有一个调优的过程值得说一下：原始的点云是 848 乘 480 的分辨率，每帧大概 30 万个点。如果直接全部灌进去，树莓派 5 的 CPU 直接就满了。所以我先用 PassThrough 直通滤波保留 0.3 到 2 米的高度范围，把天花板和地面噪点去掉，然后用 VoxelGrid 做体素降采样。这个叶子节点的大小我调过好几次：最开始用 2 厘米，CPU 还是高；后来逐步放大到 5 厘米，点云从 30 万降到了 1.5 万点，CPU 占用从 85\% 降到了 40\%，而且 5 厘米的体素在室内场景下仍然能保留桌角、椅子腿这些关键障碍物的轮廓。最终体素层的代价地图就能标记出原本雷达漏检的那些障碍物投影，DWA 规划器在局部路径采样的时候就会提前避让。
+
+说到 DWA，这里也有一个调试的坑。小车在动态人员经过的时候经常卡死，一开始我以为是膨胀半径的问题，调到 0.5 米也没用。后来我在 RViz 里把 DWA 的轨迹可视化打开，才发现采样的轨迹最长只有 0.5 米，根本绕不过去。原因是 sim\_time 只设了 1.5 秒，前瞻距离太短。我逐步从 1.5 秒调到 3.5 秒之后，前瞻距离到了 1 米左右，小车的绕行就非常平滑了，再也没有卡死过。
+
+另外我还跑了一个 RTAB-Map 做三维纹理建图。因为树莓派算力有限，我没有让它参与实时导航决策，而是以 1 赫兹的低频异步模式运行，特征提取强制用 ORB 来控制消耗，生成的彩色点云只用来做可视化展示，不影响避障的实时性。
+
+总的来说，这个项目实现了从底层硬件到上层导航的完整闭环。我自己最有收获的地方是，真正理解了每个参数在实际场景里意味着什么——比如 sim\_time 小半秒车就过不去，叶子节点大 3 厘米 CPU 就降一半。这种经验是看教程学不到的，必须自己调过才知道。
+
+（以上就是这个项目的大致情况。\ ）
+
+\vspace{1em}
+\noindent\textbf{踩坑记录}
+
+以下按重要程度排列，面试官追问技术细节时使用。
+
+\vspace{1em}
+
+\textbf{坑 1：DWA 动态避障卡死}
+
+\textbf{现象：}
+小车在行驶中遇到动态人员经过时，频繁原地停滞、规划超时，最终触发 Nav2 的
+\texttt{Recovery} 行为（旋转后退），无法正常绕行。
+
+\textbf{排查过程：}
+\begin{enumerate}
+  \item 起初怀疑是代价地图膨胀半径 (\texttt{inflation\_radius}) 太小，
+        障碍物靠近路径边界时安全余量不足。从 0.3~m 调至 0.5~m，重新跑
+        同一段路，卡死依旧，排除。
+  \item 打开 RViz 中 DWA 的轨迹可视化（\texttt{/move\_base/Trajectory} 话题），
+        发现 DWA 采样的轨迹最大仅约 0.5~m 长。此时机器人与人员相距约 1~m，
+        轨迹根本无法绕过障碍物的侧面。
+  \item 确认是 DWA 的前向模拟时间 (\texttt{sim\_time}) 过短导致前瞻不足。
+\end{enumerate}
+
+\textbf{根因：}
+\texttt{sim\_time} 默认值 1.5~s，乘以线速度上限 0.3~m/s ≈ 0.45~m 前瞻距离。
+而典型的避障绕行需要至少车身长度（约 0.6~m）以上的前瞻窗口才能生成完整的
+圆弧轨迹。
+
+\textbf{解决方案：}
+将 \texttt{sim\_time} 从 1.5~s 逐级调整：1.5 → 2.0 → 2.5 → 3.0 → 3.5~s。
+每轮在同一条有动态人员干扰的走廊跑 5 趟取成功率。3.5~s 后 DWA 的前瞻距离
+约 1.05~m，足以在一次采样中规划出完整的绕行弧线，卡死彻底消失。
+
+\textbf{效果：}
+动态干扰场景下的导航成功率从约 60\% 提升至 95\% 以上，不再触发 Recovery 行为。
+
+\vspace{2em}
+
+\textbf{坑 2：PCL 点云处理导致 CPU 满载}
+
+\textbf{现象：}
+部署 RGB-D 点云管线后（PassThrough + VoxelGrid + 注入 Voxel Layer），
+树莓派 5 的 CPU 占用率飙至 85\% 以上，同时 Cartographer 和 Nav2 的
+节点出现周期性卡顿（/odom 话题延迟超 200~ms）。
+
+\textbf{排查过程：}
+\begin{enumerate}
+  \item 用 \texttt{top} 定位到高占用进程是 \texttt{pointcloud\_filter} 节点
+        （PCL 管线），单核跑满。
+  \item 用 \texttt{rostopic bw /camera/depth/points} 确认原始点云带宽约
+        6~MB/s（848×480 深度图经 RealSense 解包后约 30 万点/帧 @ 15~Hz）。
+  \item 逐步提高 VoxelGrid 的叶子节点尺寸：1~cm → 2~cm → 3~cm → 5~cm，
+        同时观察 CPU 和障碍物检测效果。
+\end{enumerate}
+
+\textbf{根因：}
+VoxelGrid 的叶子节点设为 2~cm 时，体素数量仍过多
+（30 万点 / 2³ ≈ 3.75 万体素），加上下游的坐标系变换（TransformListener）
+和 Nav2 代价地图层更新，超出了树莓派 5 的单核处理能力。
+
+\textbf{解决方案：}
+\begin{itemize}
+  \item 将 VoxelGrid 叶子节点从 2~cm 调至 5~cm，体素数量降至约
+        1.5 万（30 万 / 5³），PCL 管线帧率稳定在 10~Hz。
+  \item 增加 PassThrough 的 Z 轴范围（0.3--2.0~m），在降采样前先剔除
+        天花板和地面噪点，进一步减少无效点。
+\end{itemize}
+
+\textbf{效果：}
+CPU 占用率从 85\% 降至约 40\%，代价地图更新稳定在 10~Hz，
+障碍物轮廓保留完整（5~cm 体素在室内场景下足够分辨椅子腿和桌角），
+精度无明显损失。
+
+\vspace{2em}
+
+\textbf{坑 3：librealsense ARM 源码编译失败}
+
+\textbf{现象：}
+在树莓派 5 (ARM64, Ubuntu 22.04) 上从源码编译 \texttt{librealsense} 时，
+cmake 配置阶段报 \texttt{ERROR: Unsupported architecture}，强制跳过架构检查后
+编译到 \texttt{uvc 视频流}模块时崩溃。
+
+\textbf{排查过程：}
+\begin{enumerate}
+  \item 定位到 \texttt{librealsense} 的 \texttt{CMakeLists.txt} 中对 ARM
+        架构做了架构白名单过滤，只放行 x86\_64，ARM 不在白名单中。
+  \item 使用 \texttt{-DCMAKE\_CROSSCOMPILING=FALSE -DFORCE\_RSUSB\_BACKEND=TRUE}
+        强制启用 USB 后端后，出现缺失 \texttt{libusb\_xxx} 符号的链接错误。
+  \item 最终排查到 Ubuntu 22.04 ARM 源中的 \texttt{libusb-1.0-dev} 版本过于陈旧
+        （1.0.25），RealSense 的 \texttt{rsusb} 后端需要 ≥ 1.0.26 的新 API。
+\end{enumerate}
+
+\textbf{根因：}
+上游 librealsense 官方未正式支持 ARM 平台（主要面向 x86 的 Linux/Windows），
+其 UVC 后端依赖 thrid\_party 的 \texttt{libuvc} 库在 ARM 上未充分测试；
+而强制切换 RSUSB 后端后又因系统 \texttt{libusb} 版本过低导致链接失败。
+
+\textbf{解决方案：}
+\begin{itemize}
+  \item 放弃源码编译，切换至 Intel 官方预编译的 \texttt{librealsense2-dev}
+        ARM64 deb 包（Intel 从 SDK 2.50 起提供了 arm64 的 apt 源）。
+  \item 添加 Intel 的 apt 仓库后直接 \texttt{apt install librealsense2-dev}，
+        依赖自动拉齐。
+\end{itemize}
+
+\textbf{效果：}
+驱动安装耗时从自编译的数小时缩短至 5 分钟，且预编译包已启用 DSP 加速，
+深度图解码帧率比自编译版本提升约 20\%。
+
+\vspace{2em}
+
+\textbf{坑 4：RPLIDAR A2 USB 转串口掉线}
+
+\textbf{现象：}
+运行时 \texttt{rplidar\_ros} 节点不定时报 \texttt{Serial channel timed out} 错误，
+然后自动重连，每次掉线会导致激光数据中断 3--5~s，Cartographer 在此期间
+失去输入，位姿发散。
+
+\textbf{排查过程：}
+\begin{enumerate}
+  \item 先用 \texttt{dmesg -w} 实时监控内核消息，发现掉线时刻总是伴随
+        \texttt{ch341-uart ttyUSB0: failed to set baud rate} 警告。
+  \item 确认 RPLIDAR A2 使用的 USB 转串口芯片是 CH340，怀疑是 RPi5 的
+        USB 口供电不足导致串口芯片在瞬间电流波动时复位。
+  \item 用 \texttt{lsusb -t} 查看 USB 拓扑，发现 RPLIDAR 和 RealSense
+        接在同一个 USB 控制器下（RPi5 只有单个 USB 3.0 控制器）。
+  \item 分别用独立供电的 USB HUB 给 RPLIDAR 供电（外接 5V 电源），
+        问题复现频率从每 5 分钟一次降至每 2 小时一次。
+  \item 进一步检查发现 CH340 驱动（\texttt{ch341.ko}）在 Linux 6.2+ 内核中
+        有已知的波特率切换 bug，RPLIDAR 的初始化过程中会动态切换波特率
+        （115200 → 256000），触发驱动 bug。
+\end{enumerate}
+
+\textbf{根因：}
+两个因素叠加：① RPi5 的 USB 口供电余量不足，遇激光雷达电机启动时
+瞬间拉低电压，导致 CH340 复位；② 内核 \texttt{ch341} 驱动在波特率切换
+时存在竞态条件（主线内核在 6.5 中才修复）。
+
+\textbf{解决方案：}
+\begin{itemize}
+  \item 加装带外部供电的 USB HUB，隔离 RPLIDAR 与 RealSense 的供电。
+  \item 将 RPLIDAR 的固件配置改为固定 256000 波特率启动，绕过
+        驱动在启动阶段的波特率切换，彻底避开内核 bug。
+\end{itemize}
+
+\textbf{效果：}
+连续运行 4 小时以上的多次测试中未再出现 \texttt{Serial channel timed out} 错误。
+
+\vspace{2em}
+
+\textbf{坑 5：Cartographer 2D 建图长走廊偏移}
+
+\textbf{现象：}
+在约 15~m 长的狭窄走廊中运行 Cartographer，回环检测触发前，
+建图结果在远端出现约 0.3~m 的横向漂移，导致地图在走廊末端"歪"了。
+
+\textbf{排查过程：}
+\begin{enumerate}
+  \item 首先怀疑是激光帧间匹配（Scan-to-Submap）的参数不够鲁棒。
+        调整 \texttt{ceres\_scan\_matcher} 中的平移权重（translation\_weight）
+        和旋转权重（rotation\_weight）从默认 40/40 调至 10/400
+        （大幅压制旋转自由度），漂移缩小但未消除。
+  \item 开启动态 IMU 融合（\texttt{use\_imu\_data = true}），将 IMU 的
+        角速度观测作为 scan matching 的先验约束，漂移进一步缩小至 0.1~m。
+  \item 最终排查发现走廊地面有轻微坡度（约 2°），RPLIDAR 扫描平面与
+        水平面不平行，导致激光点云在远端的投影误差随时间累积。
+\end{enumerate}
+
+\textbf{根因：}
+RPLIDAR A2 是单线雷达，扫描平面固定。当机器人在有坡度的地面行驶时，
+激光扫描平面与水平面的夹角使远端点云在 \texttt{submap} 中的投影产生
+系统性的偏移误差，且该误差在缺乏回环约束的长直场景中单向积累。
+
+\textbf{解决方案：}
+\begin{itemize}
+  \item 启用 Cartographer 的 \texttt{use\_imu\_data} 参数，利用 IMU 提供的
+        重力向量（roll/pitch）对激光扫描做实时倾角补偿。
+  \item 将 \texttt{submaps.num\_range\_data} 从默认的 90 降至 45，
+        提高子图的更新频率，使子图更快收敛，减少开放端漂移。
+\end{itemize}
+
+\textbf{效果：}
+长走廊末端的横向漂移从 0.3~m 降至 0.05~m 以内（经多次往返验证），
+Cartographer 的全局一致性显著改善。
+
+\vspace{2em}
+
+\textbf{坑 6：底盘编码器分辨率不足导致里程计发散}
+
+\textbf{现象：}
+小车直行 5~m 后，EKF 输出的 \texttt{odom→base\_link} 累积了约 0.3~m 的
+位置误差（约 6\% 漂移）。在反复启停的轨迹中，漂移进一步加剧，
+Cartographer 的帧间匹配频繁出现高残差。
+
+\textbf{排查过程：}
+\begin{enumerate}
+  \item 用卷尺测量实际行驶距离，确认是编码器读数偏大而非打滑。
+  \item 计算编码器理论分辨率：电机每圈脉冲数 PPR × 减速比 × 轮周长。
+        底盘使用的 AGV 电机标称 720~PPR，减速比 30:1，轮径 65~mm。
+        理论每脉冲对应行进距离：$\pi \times 65 / (720 \times 30) \approx 0.0094$~mm。
+  \item 实测后发现实际轮径在负载下因胎压变化有效直径缩小约 5\%，
+        而代码中仍使用空载轮径计算里程，导致系统性地高估移动距离。
+\end{enumerate}
+
+\textbf{根因：}
+轮径标定不准——麦克纳姆轮或普通橡胶轮在整车自重下会产生形变，
+有效滚动半径比空载时小。而里程计算使用的是空载测得的轮径，
+导致每转一圈的行进距离被高估。
+
+\textbf{解决方案：}
+\begin{itemize}
+  \item 做直线标定实验：让小车行驶 10~m（卷尺测量），对比编码器累计读数，
+        计算实际轮径校正系数 new\_radius = old\_radius × 实测距离 / 编码器距离。
+  \item 将校正后的轮径写入 ROS 参数（约 61.8~mm，比标称 65~mm 缩小 5\%），
+        重启后里程计直线漂移从 6\% 降至 0.5\% 以内。
+\end{itemize}
+
+\textbf{效果：}
+编码器里程计的长距离精度从 6\% 误差提升至 0.5\% 以内，
+Cartographer 的激光帧间匹配残差显著降低，建图质量随之改善。
+
+\vspace{2em}
+
+\textbf{坑 7：ROS 2 DDS 节点发现超时（FastDDS vs CycloneDDS）}
+
+\textbf{现象：}
+树莓派 5 启动 Nav2 全套节点后，\texttt{move\_base} 节点经常在启动后
+等待 10--30~s 才能与其他节点建立通信，有时甚至出现话题发现失败
+（behavior\_tree 节点收不到 /odom 话题）。
+
+\textbf{排查过程：}
+\begin{enumerate}
+  \item 用 \texttt{ros2 doctor} 检查，提示 DDS 通信层存在丢包。
+  \item 查阅 ROS 2 Humble 在 RPi5 上的已知问题，发现 FastDDS 默认使用
+        UDP 多播发现，而树莓派的 WiFi 网卡对 UDP 多播支持不稳定
+        （某些路由器会丢弃 IGMP 报文）。
+  \item 尝试在 \texttt{fastdds.xml} 中配置为仅使用共享内存
+        （SHM）传输、禁用 UDP，但跨机场景（如果需连接调试 PC）又失效。
+  \item 最终将 RMW 从 FastDDS 切换至 CycloneDDS（\texttt{RMW\_IMPLEMENTATION}
+        = \texttt{rmw\_cyclonedds\_cpp}），CycloneDDS 使用 TCP 作为默认传输，
+        在单板机上更稳定。
+\end{enumerate}
+
+\textbf{根因：}
+FastDDS 的 UDP 多播发现机制在 RPi5 的 WiFi 网络环境下不稳定；
+共享内存传输（SHM）虽然本地进程间可靠，但无法扩展到跨机调试。
+
+\textbf{解决方案：}
+\begin{itemize}
+  \item 将 RMW 实现切换为 CycloneDDS，安装：\texttt{apt install ros-humble-rmw-cyclonedds-cpp}。
+  \item 在 \texttt{.bashrc} 中设置 \texttt{export RMW\_IMPLEMENTATION=rmw\_cyclonedds\_cpp}。
+  \item 为避免 CycloneDDS 在纯本地模式下的额外 TCP 开销，在
+        \texttt{CYCLONEDDS\_URI} 配置中启用 SHM 传输作为本地回环，TCP 仅用于跨机。
+\end{itemize}
+
+\textbf{效果：}
+节点启动后在 2~s 内完成发现，再无话题超时或丢失。同时 CycloneDDS 与 FastDDS
+在 RPi5 上的 CPU 开销基本持平，无性能退化。
+
+\vspace{2em}
+
+\textbf{坑 8：Nav2 代价地图陷入局部最小导致 Recovery 循环}
+
+\textbf{现象：}
+小车在家居场景（茶几和沙发间隙约 0.5~m）中导航时，频繁进入 Recovery 循环：
+ClearCostmap → Spin → Backup → ClearCostmap，循环 3--5 轮后放弃规划，
+最终停在原地报 \texttt{Goal was not achieved}。
+
+\textbf{排查过程：}
+\begin{enumerate}
+  \item 在 RViz 中打开代价地图层可视化，发现障碍物层在狭窄通道中
+        将路径两侧的膨胀半径重叠，导致全局路径规划认为通道被完全封锁。
+  \item 检查膨胀参数：\texttt{inflation\_radius = 0.4~m}，而通道净宽
+        约 0.5~m，两侧膨胀后机器人宽度+安全余量 ≈ 0.6~m，确实无可行路径。
+  \item 手动将机器人拉到开阔地带后 Recovery 自动清除，说明不是全局
+        路径规划器的问题，而是局部代价地图在狭窄空间中的膨胀半径
+        与实时障碍物叠加后临时形成了"死锁"。
+\end{enumerate}
+
+\textbf{根因：}
+\texttt{inflation\_radius}（0.4~m）相对于通道宽度（0.5~m）过大，
+当 DWA 局部规划器在狭窄区域采样时，所有采样轨迹的代价评分都在膨胀区
+以内，导致无可行轨迹可选，触发 Recovery 行为。
+
+\textbf{解决方案：}
+\begin{itemize}
+  \item 将 \texttt{inflation\_radius} 从 0.4~m 下调至 0.25~m，
+        使 0.5~m 宽的通道在膨胀后仍有约 0.25~m 的可通行区域。
+  \item 开启 DWA 的 \texttt{path\_align\_preference} 参数，让局部规划器
+        更倾向于跟踪全局路径，而非在狭窄空间中过度尝试绕行。
+  \item 增加 Recovery 行为树中的 \texttt{clear\_costmap\_service} 的
+        自定义区域清理，只清除小范围（机器人周围 1~m）的障碍物层，
+        避免全图清理后导航反应过激。
+\end{itemize}
+
+\textbf{效果：}
+狭窄通道的通行成功率从不足 30\% 提升至约 85\%。就算偶尔触发 Recovery，
+局部清除一次即可恢复导航，不再进入循环死锁。
+
+\vspace{2em}
+
+\textbf{坑 9：EKF 与 Cartographer 的 tf 树嵌套（架构设计阶段）}
+
+\textbf{现象：}
+最初设计时错误地将 Cartographer 发布的位姿作为 \texttt{robot\_localization}
+EKF 的一个观测输入，导致 tf 树结构为
+\texttt{map → [Cartographer] → odom → [EKF] → base\_link}。
+运行时发现 Cartographer 一旦触发回环校正、发布跳变的 \texttt{map→odom} 后，
+EKF 会将这个跳变吸收到 \texttt{odom→base\_link} 里，造成里程计跳变，
+进而又影响 Cartographer 的帧间匹配，形成正反馈发散。
+
+\textbf{排查过程：}
+在 \texttt{ros2 run tf2\_tools tf2\_monitor} 中观察到 \texttt{odom→base\_link}
+变换在 Cartographer 回环校正的瞬间出现异常跳变（0.5~m 级），而非平滑过渡。
+
+\textbf{根因：}
+架构设计上的循环依赖——EKF 不应消费 Cartographer 的全局位姿。
+标准做法是：EKF 只融合局部传感器（编码器 + IMU），Cartographer 只发布 map→odom，
+两个节点解耦。
+
+\textbf{解决方案：}
+将架构改为：
+\begin{center}
+\texttt{map ──[Cartographer]──→ odom ──[EKF]──→ base\_link}
+\end{center}
+Cartographer 的位姿不输入 EKF，仅在 /map 坐标系层面对 odom 做长期漂移修正。
+EKF 只输出高频局部位姿，不受回环影响。
+
+\textbf{效果：}
+回环校正时 \texttt{odom→base\_link} 保持平滑，仅 \texttt{map→odom} 发生跳变，
+符合 ROS 标准 tf 树设计规范，系统稳定性显著提升。
+
+% ============================================================
+% 科研项目：基于道路标识的车辆定位方法研究
+% ============================================================
+\subsection*{科研项目：基于道路标识的车辆定位方法研究}
+
+% TODO：待补充
+
+\end{document}

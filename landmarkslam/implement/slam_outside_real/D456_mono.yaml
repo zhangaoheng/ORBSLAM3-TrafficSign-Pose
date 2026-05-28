@@ -7,8 +7,8 @@ File.version: "1.0"
 
 Camera.type: "PinHole"
 
-Camera1.fx: 426.372
-Camera1.fy: 425.671
+Camera1.fx: 426.604
+Camera1.fy: 425.903
 Camera1.cx: 435.525
 Camera1.cy: 244.974
 

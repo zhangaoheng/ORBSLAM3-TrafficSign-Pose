@@ -1,6 +1,6 @@
 /**
 * This file is part of ORB-SLAM3
-* (Modified: IMU_RGBD mode, custom trajectory file path, save all frames trajectory)
+* (Modified: IMU_RGBD mode, CSV/space IMU format support, custom trajectory path)
 */
 
 #include<iostream>
@@ -13,6 +13,7 @@
 #include<opencv2/core/core.hpp>
 
 #include<System.h>
+#include<ImuTypes.h>
 
 using namespace std;
 
@@ -30,8 +31,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    // 判断是否提供了自定义输出文件名
-    string trajectory_file = "CameraTrajectory"; // 默认基础名
+    string trajectory_file = "CameraTrajectory";
     if(argc == 7)
         trajectory_file = string(argv[6]);
 
@@ -69,7 +69,6 @@ int main(int argc, char **argv)
     cout << "Images in the sequence: " << nImages << endl;
     cout << "IMU measurements: " << vTimestampsImu.size() << endl << endl;
 
-    // IMU 数据索引
     int first_imu = 0;
 
     for(int ni=0; ni<nImages; ni++)
@@ -113,23 +112,11 @@ int main(int argc, char **argv)
 
         double ttrack = std::chrono::duration_cast<std::chrono::duration<double> >(t2 - t1).count();
         vTimesTrack[ni]=ttrack;
-
-        // 根据时间戳延时等待（保持实时播放效果）
-        double T=0;
-        if(ni<nImages-1)
-            T = vTimestampsCam[ni+1]-tframe;
-        else if(ni>0)
-            T = tframe-vTimestampsCam[ni-1];
-        if(ttrack<T)
-            usleep((T-ttrack)*1e6);
     }
 
-    // 停止所有线程
     SLAM.Shutdown();
 
-    // =======================================================
-    // 主动保存所有帧轨迹（使用自定义路径）
-    // =======================================================
+    // 保存轨迹
     string output_dir = "./";
     string base_name = trajectory_file;
     size_t pos = base_name.find_last_of("/\\");
@@ -139,17 +126,14 @@ int main(int argc, char **argv)
         base_name = base_name.substr(pos+1);
     }
 
-    // 保存所有帧的 TUM 轨迹
     string allframes_path = output_dir + "AllFrames_" + base_name + ".txt";
     SLAM.SaveTrajectoryTUM(allframes_path);
     cout << "✅ All frames trajectory saved to: " << allframes_path << endl;
 
-    // 同时保存关键帧轨迹
     string keyframes_path = output_dir + "KeyFrames_" + base_name + ".txt";
     SLAM.SaveKeyFrameTrajectoryTUM(keyframes_path);
     cout << "✅ Keyframe trajectory saved to: " << keyframes_path << endl;
 
-    // 跟踪时间统计
     sort(vTimesTrack.begin(),vTimesTrack.end());
     float totaltime = 0;
     for(int ni=0; ni<nImages; ni++)
@@ -209,23 +193,56 @@ void LoadIMU(const string &strImuPath, vector<double> &vTimeStamps, vector<cv::P
     vAcc.reserve(5000);
     vGyro.reserve(5000);
 
-    while(!fImu.eof())
+    string first;
+    getline(fImu, first);
+    bool csv_format = (first.find("timestamp") != string::npos);
+
+    if(csv_format)
     {
-        string s;
-        getline(fImu, s);
-        if(s.empty() || s[0] == '#')
-            continue;
-
-        stringstream ss;
-        ss << s;
-        double data[7];
-        for(int i = 0; i < 7; i++)
-            ss >> data[i];
-
-        // 格式: timestamp_ns w_x w_y w_z a_x a_y a_z
-        vTimeStamps.push_back(data[0] / 1e9);  // ns -> s
-        vGyro.push_back(cv::Point3f(data[1], data[2], data[3]));
-        vAcc.push_back(cv::Point3f(data[4], data[5], data[6]));
+        // CSV 格式: timestamp_ms,sensor_type,x,y,z (accel/gyro 分两行)
+        string line;
+        while(getline(fImu, line))
+        {
+            if(line.empty()) continue;
+            stringstream ss(line);
+            string ts_str, type, x_str, y_str, z_str;
+            getline(ss, ts_str, ',');
+            getline(ss, type, ',');
+            getline(ss, x_str, ',');
+            getline(ss, y_str, ',');
+            getline(ss, z_str, ',');
+            double t = stod(ts_str) / 1000.0;
+            cv::Point3f val(stof(x_str), stof(y_str), stof(z_str));
+            if(type == "accel")
+            {
+                vTimeStamps.push_back(t);
+                vAcc.push_back(val);
+            }
+            else if(type == "gyro")
+            {
+                vTimeStamps.push_back(t);
+                vGyro.push_back(val);
+            }
+        }
+        cout << "Loaded " << vAcc.size() << " accel, " << vGyro.size() << " gyro measurements." << endl;
     }
-    cout << "Loaded " << vTimeStamps.size() << " IMU measurements." << endl;
+    else
+    {
+        // 旧格式: timestamp_ns w_x w_y w_z a_x a_y a_z (空格分隔)
+        auto parse = [&](const string &s) {
+            if(s.empty() || s[0] == '#') return;
+            stringstream ss;
+            ss << s;
+            double data[7];
+            for(int i = 0; i < 7; i++)
+                ss >> data[i];
+            vTimeStamps.push_back(data[0] / 1e9);
+            vGyro.push_back(cv::Point3f(data[1], data[2], data[3]));
+            vAcc.push_back(cv::Point3f(data[4], data[5], data[6]));
+        };
+        parse(first);
+        string line;
+        while(getline(fImu, line)) parse(line);
+        cout << "Loaded " << vTimeStamps.size() << " IMU measurements." << endl;
+    }
 }

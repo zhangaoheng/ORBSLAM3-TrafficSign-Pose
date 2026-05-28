@@ -3,11 +3,12 @@
 # run_real.sh — RealSense D456 实采数据一键 SLAM 处理
 #
 # 用法:
-#   ./run_real.sh                    # 单目模式 (默认)
-#   ./run_real.sh mono               # 单目模式
-#   ./run_real.sh rgbd               # RGB-D 模式
-#   ./run_real.sh [mode] run_xxx     # 指定数据目录
-#   ./run_real.sh [mode] /全/路径     # 任意路径
+#   ./run_real.sh                          # 单目模式 (默认)
+#   ./run_real.sh mono                     # 单目模式
+#   ./run_real.sh rgbd                     # RGB-D 模式
+#   ./run_real.sh rgbd_inertial            # RGB-D + IMU 模式
+#   ./run_real.sh [mode] run_xxx           # 指定数据目录
+#   ./run_real.sh [mode] /全/路径          # 任意路径
 # ==============================================================
 
 set -e
@@ -18,22 +19,22 @@ ORB_SLAM3_DIR="$SCRIPT_DIR/../../.."
 VOCAB="$ORB_SLAM3_DIR/Vocabulary/ORBvoc.txt"
 
 # --- 参数解析 ---
-MODE="mono"  # 默认单目
+MODE="mono"
 DATA_ARG=""
 
 if [ -z "$1" ]; then
-    :  # 双默认
-elif [ "$1" = "mono" ] || [ "$1" = "rgbd" ]; then
+    :  # 默认 mono
+elif [ "$1" = "mono" ] || [ "$1" = "rgbd" ] || [ "$1" = "rgbd_inertial" ]; then
     MODE="$1"
     DATA_ARG="$2"
 else
     DATA_ARG="$1"
 fi
 
-if [ "$MODE" = "rgbd" ]; then
-    CONFIG="$SCRIPT_DIR/D456_RGBD.yaml"
-else
+if [ "$MODE" = "mono" ]; then
     CONFIG="$SCRIPT_DIR/D456_mono.yaml"
+else
+    CONFIG="$SCRIPT_DIR/D456_RGBD.yaml"
 fi
 
 # --- 解析数据路径 ---
@@ -59,17 +60,33 @@ echo "  数据:   $(basename "$DATA_DIR")"
 echo "=========================================="
 
 # --- 准备输入文件 ---
+IN_FILE="$DATA_DIR/associations.txt"
+
 if [ "$MODE" = "mono" ]; then
     IN_FILE="$DATA_DIR/times.txt"
-    if [ ! -f "$IN_FILE" ]; then
+    if [ ! -f "$IN_FILE" ] || [ ! -s "$IN_FILE" ]; then
         echo "生成 times.txt (从 associations.txt 提取 RGB)..."
         awk '{print $1, $2}' "$DATA_DIR/associations.txt" > "$IN_FILE"
         echo "  → $(wc -l < "$IN_FILE") 帧"
     fi
     echo "  RGB:    $DATA_DIR/rgb/"
     echo "  时间戳: $IN_FILE"
-else
-    IN_FILE="$DATA_DIR/associations.txt"
+elif [ "$MODE" = "rgbd_inertial" ]; then
+    # 尝试 imu_data.csv 或 imu.txt
+    if [ -f "$DATA_DIR/imu_data.csv" ]; then
+        IMU_FILE="$DATA_DIR/imu_data.csv"
+    elif [ -f "$DATA_DIR/imu.txt" ]; then
+        IMU_FILE="$DATA_DIR/imu.txt"
+    else
+        echo "❌ 缺少 IMU 文件 (imu_data.csv 或 imu.txt)"
+        exit 1
+    fi
+    [ -f "$IN_FILE" ]  || { echo "❌ 缺少: $IN_FILE";  exit 1; }
+    echo "  RGB:    $DATA_DIR/rgb/"
+    echo "  Depth:  $DATA_DIR/depth/"
+    echo "  关联:   $IN_FILE"
+    echo "  IMU:    $IMU_FILE"
+else  # rgbd
     [ -f "$IN_FILE" ] || { echo "❌ 缺少: $IN_FILE"; exit 1; }
     echo "  RGB:    $DATA_DIR/rgb/"
     echo "  Depth:  $DATA_DIR/depth/"
@@ -93,13 +110,24 @@ OUTPUT_DIR="$SCRIPT_DIR/../output"
 mkdir -p "$OUTPUT_DIR"
 cd "$OUTPUT_DIR"
 
-"$BUILD_DIR/run_real" \
-    "$MODE" \
-    "$VOCAB" \
-    "$CONFIG" \
-    "$DATA_DIR" \
-    "$IN_FILE" \
-    "$(basename "$DATA_DIR")"
+if [ "$MODE" = "rgbd_inertial" ]; then
+    "$BUILD_DIR/run_real" \
+        "$MODE" \
+        "$VOCAB" \
+        "$CONFIG" \
+        "$DATA_DIR" \
+        "$IN_FILE" \
+        "$IMU_FILE" \
+        "$(basename "$DATA_DIR")"
+else
+    "$BUILD_DIR/run_real" \
+        "$MODE" \
+        "$VOCAB" \
+        "$CONFIG" \
+        "$DATA_DIR" \
+        "$IN_FILE" \
+        "$(basename "$DATA_DIR")"
+fi
 
 echo ""
 echo "[3/3] ✅ 完成!"
