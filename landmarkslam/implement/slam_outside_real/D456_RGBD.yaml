@@ -7,17 +7,17 @@ File.version: "1.0"
 
 Camera.type: "PinHole"
 
-# ORB-SLAM3 特有的相机内参格式
-Camera1.fx: 426.256
-Camera1.fy: 425.555
+# ORB-SLAM3 特有的相机内参格式（从 bag 的 camera_intrinsics.json 读取）
+Camera1.fx: 427.417
+Camera1.fy: 426.714
 Camera1.cx: 435.525
 Camera1.cy: 244.974
 
-# 畸变参数
-Camera1.k1: 0.0
-Camera1.k2: 0.0
-Camera1.p1: 0.0
-Camera1.p2: 0.0
+# 畸变参数（从 bag 获取）
+Camera1.k1: -0.05629
+Camera1.k2: 0.06567
+Camera1.p1: 0.000058
+Camera1.p2: 0.000832
 
 # 以下为相机全局属性
 Camera.width: 848

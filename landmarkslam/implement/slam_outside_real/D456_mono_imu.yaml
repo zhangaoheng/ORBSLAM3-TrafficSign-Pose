@@ -1,8 +1,5 @@
 %YAML:1.0
 
-#--------------------------------------------------------------------------------------------
-# Camera Parameters
-#--------------------------------------------------------------------------------------------
 File.version: "1.0"
 
 Camera.type: "PinHole"
@@ -23,16 +20,38 @@ Camera.fps: 30
 Camera.RGB: 1
 
 #--------------------------------------------------------------------------------------------
-# ORB Parameters (稳定性优化：适量特征 + 高阈值)
+# IMU Parameters
 #--------------------------------------------------------------------------------------------
-ORBextractor.nFeatures: 1000
-ORBextractor.scaleFactor: 1.2
-ORBextractor.nLevels: 8
-ORBextractor.iniThFAST: 15
-ORBextractor.minThFAST: 7
+IMU.Frequency: 200.0
+IMU.GyroThreshold: 0.2
+IMU.AccThreshold: 1.0
+IMU.NoiseGyro: 1.5e-1      # v1已验证可初始化
+IMU.NoiseAcc:  1.5e0        # v1已验证
+IMU.GyroWalk: 1e-4         # v1原始值
+IMU.AccWalk: 1e-3           # v1原始值
+IMU.InsertKFsWhenLost: 1   # 丢跟踪时也插关键帧，给IMU更多数据
+
+# Tbc: 相机到 IMU 的变换矩阵 (从 D456 标定)
+IMU.T_b_c1: !!opencv-matrix
+   rows: 4
+   cols: 4
+   dt: f
+   data: [0.999903, -0.0138036, -0.00208099, -0.0202141,
+         0.0137985, 0.999902, -0.00243498, 0.00505961,
+         0.0021144, 0.00240603, 0.999995, 0.0114047,
+         0.0, 0.0, 0.0, 1.0]
 
 #--------------------------------------------------------------------------------------------
-# Viewer Parameters
+# ORB Parameters
+#--------------------------------------------------------------------------------------------
+ORBextractor.nFeatures: 2000
+ORBextractor.scaleFactor: 1.2
+ORBextractor.nLevels: 8
+ORBextractor.iniThFAST: 10
+ORBextractor.minThFAST: 5
+
+#--------------------------------------------------------------------------------------------
+# Viewer
 #--------------------------------------------------------------------------------------------
 Viewer.KeyFrameSize: 0.05
 Viewer.KeyFrameLineWidth: 1.0
@@ -45,11 +64,6 @@ Viewer.ViewpointY: -0.7
 Viewer.ViewpointZ: -1.8
 Viewer.ViewpointF: 500.0
 
-#--------------------------------------------------------------------------------------------
-# 回环检测（直道平面场景易导致 Sim3 退化，关闭防止 NaN 崩溃）
-#--------------------------------------------------------------------------------------------
-loopClosing: 0
-
 System.SaveAtlasToFile: ""
 System.LoadAtlasFromFile: ""
-System.thFarPoints: 40.0
+System.thFarPoints: 100.0

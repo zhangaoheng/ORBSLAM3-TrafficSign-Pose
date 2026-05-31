@@ -8,6 +8,8 @@
 """
 
 import sys
+import io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 import csv
 import json
 import pathlib
@@ -15,9 +17,12 @@ import struct
 import cv2
 import numpy as np
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent.parent /
-                        'landmarkslam' / 'yolo_venv' / 'lib' / 'python3.10' / 'site-packages'))
-from rosbags.highlevel import AnyReader
+try:
+    from rosbags.highlevel import AnyReader
+except ImportError:
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent.parent /
+                            'landmarkslam' / 'yolo_venv' / 'lib' / 'python3.10' / 'site-packages'))
+    from rosbags.highlevel import AnyReader
 
 # ============================================================
 TOPIC_COLOR       = '/device_0/sensor_1/Color_0/image/data'
@@ -83,11 +88,119 @@ def save_image(msg, save_path: str):
     cv2.imwrite(save_path, arr)
 
 
-BAG_PATH = "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/20260528_153824.bag"
+BAG_PATH = "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/20260529_114122.bag"
 OUTPUT_DIR = "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/extracted_data"
 
 
+def extract_timestamps_only(bag_path, out_dir):
+    """只读时间戳 + IMU，不碰图片（图片已存在时用这个）"""
+    assoc_file = out_dir / 'associations.txt'
+    times_file = out_dir / 'times.txt'
+    imu_file   = out_dir / 'imu.txt'
+
+    print(f"⏩ 快速模式: 只提取时间戳 + IMU, 不重复保存图片")
+    print(f"📂 Bag: {bag_path}")
+    print(f"📁 Output: {out_dir}")
+
+    with AnyReader([bag_path]) as reader:
+        conns = {c.topic: c for c in reader.connections}
+
+        # --- 收集 Color + Depth 真实时间戳 ---
+        color_ts = []
+        depth_ts = []
+        for conn, _, data in reader.messages(connections=[
+            conns.get(TOPIC_COLOR), conns.get(TOPIC_DEPTH)
+        ]):
+            if conn is None:
+                continue
+            try:
+                img = parse_ros1_image(data) if not reader.is2 else reader.deserialize(data, conn.msgtype)
+            except:
+                try:
+                    img = reader.deserialize(data, conn.msgtype)
+                except:
+                    continue
+            t = ros_time_to_sec(img.header.stamp)
+            if conn.topic == TOPIC_COLOR:
+                color_ts.append(t)
+            elif conn.topic == TOPIC_DEPTH:
+                depth_ts.append(t)
+
+    color_ts.sort()
+    depth_ts.sort()
+    n = min(len(color_ts), len(depth_ts))
+    print(f"  Color: {len(color_ts)}  Depth: {len(depth_ts)}  对齐: {n}")
+
+    # --- 写 associations.txt（真实时间戳）---
+    with open(assoc_file, 'w') as f:
+        for i in range(n):
+            f.write(f"{color_ts[i]:.6f} rgb/{i:06d}.png {depth_ts[i]:.6f} depth/{i:06d}.png\n")
+    print(f"  ✅ associations.txt ({n} 行)")
+
+    # --- 写 times.txt（mono 用）---
+    with open(times_file, 'w') as f:
+        for i in range(n):
+            f.write(f"{color_ts[i]:.6f} rgb/{i:06d}.png\n")
+    print(f"  ✅ times.txt ({n} 行)")
+
+    # --- 提取 IMU ---
+    extract_imu(bag_path, out_dir, reader=None)
+
+    print(f"🎉 完成！时间戳已对齐")
+
+
+def extract_imu(bag_path, out_dir, reader=None):
+    """提取 IMU 并保存为 Euroc 格式"""
+    imu_file = out_dir / 'imu.txt'
+    accel_list, gyro_list = [], []
+
+    def _do_extract(r):
+        conns = {c.topic: c for c in r.connections}
+        if TOPIC_ACCEL in conns:
+            for _, _, data in r.messages(connections=[conns[TOPIC_ACCEL]]):
+                msg = r.deserialize(data, conns[TOPIC_ACCEL].msgtype)
+                t = ros_time_to_sec(msg.header.stamp)
+                accel_list.append([t, msg.linear_acceleration.x, msg.linear_acceleration.y, msg.linear_acceleration.z])
+        if TOPIC_GYRO in conns:
+            for _, _, data in r.messages(connections=[conns[TOPIC_GYRO]]):
+                msg = r.deserialize(data, conns[TOPIC_GYRO].msgtype)
+                t = ros_time_to_sec(msg.header.stamp)
+                gyro_list.append([t, msg.angular_velocity.x, msg.angular_velocity.y, msg.angular_velocity.z])
+
+    if reader is not None:
+        _do_extract(reader)
+    else:
+        with AnyReader([bag_path]) as r:
+            _do_extract(r)
+
+    if not accel_list or not gyro_list:
+        print("❌ 缺少 IMU 数据")
+        return
+
+    print(f"  🔄 对齐 IMU (Accel: {len(accel_list)}, Gyro: {len(gyro_list)})...")
+    accel_arr = np.array(accel_list)
+    gyro_arr = np.array(gyro_list)
+    t_accel, t_gyro = accel_arr[:, 0], gyro_arr[:, 0]
+
+    interp_ax = np.interp(t_gyro, t_accel, accel_arr[:, 1])
+    interp_ay = np.interp(t_gyro, t_accel, accel_arr[:, 2])
+    interp_az = np.interp(t_gyro, t_accel, accel_arr[:, 3])
+
+    with open(imu_file, 'w') as f:
+        f.write("# timestamp_ns w_x w_y w_z a_x a_y a_z\n")
+        for i in range(len(t_gyro)):
+            t_ns = int(t_gyro[i] * 1e9)
+            wx, wy, wz = gyro_arr[i, 1], gyro_arr[i, 2], gyro_arr[i, 3]
+            ax, ay, az = interp_ax[i], interp_ay[i], interp_az[i]
+            f.write(f"{t_ns} {wx:.6f} {wy:.6f} {wz:.6f} {ax:.6f} {ay:.6f} {az:.6f}\n")
+    print(f"  ✅ imu.txt ({len(t_gyro)} 条)")
+
+
 def main():
+    quick_mode = '--quick' in sys.argv
+    if quick_mode:
+        sys.argv.remove('--quick')
+
     if len(sys.argv) >= 2:
         bag_path = pathlib.Path(sys.argv[1])
     else:
@@ -97,6 +210,11 @@ def main():
         out_dir = pathlib.Path(sys.argv[2])
     else:
         out_dir = pathlib.Path(OUTPUT_DIR)
+
+    if quick_mode:
+        extract_timestamps_only(bag_path, out_dir)
+        return
+
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / 'rgb').mkdir(exist_ok=True)
     (out_dir / 'depth').mkdir(exist_ok=True)
@@ -129,10 +247,19 @@ def main():
                 break
 
         # ============================================================
-        # 2) 提取 RGB 和 Depth（手动解析 Image）
+        # 2) 流式提取 RGB 和 Depth — 边读边存，内存只留时间戳
         # ============================================================
-        color_list = []
-        depth_list = []
+        color_frames = []    # 只存 (timestamp, frame_id)
+        depth_frames = []    # 只存 (timestamp, frame_id)
+        color_idx = 0
+        depth_idx = 0
+
+        cam_csv = out_dir / 'camera_timestamps.csv'
+        assoc_file = out_dir / 'associations.txt'
+        fcsv = open(cam_csv, 'w', newline='')
+        fassoc = open(assoc_file, 'w')
+        csv_writer = csv.writer(fcsv)
+        csv_writer.writerow(['frame_id', 'timestamp_ms'])
 
         for conn, _, data in reader.messages(connections=[
             conns.get(TOPIC_COLOR), conns.get(TOPIC_DEPTH)
@@ -142,60 +269,60 @@ def main():
             try:
                 img = parse_ros1_image(data) if not reader.is2 else reader.deserialize(data, conn.msgtype)
             except Exception:
-                # fallback
                 try:
                     img = reader.deserialize(data, conn.msgtype)
                 except:
                     continue
+
             t = ros_time_to_sec(img.header.stamp)
+
             if conn.topic == TOPIC_COLOR:
-                color_list.append((t, img))
+                frame_id = f"{color_idx:06d}.png"
+                # 立即存盘 — 不占内存
+                save_image(img, str(out_dir / 'rgb' / frame_id))
+                color_frames.append((t, frame_id))
+                color_idx += 1
+                if color_idx % 100 == 0:
+                    print(f"  ⏳ 已提取 Color: {color_idx} 帧...")
+
             elif conn.topic == TOPIC_DEPTH:
-                depth_list.append((t, img))
+                frame_id = f"{depth_idx:06d}.png"
+                save_image(img, str(out_dir / 'depth' / frame_id))
+                depth_frames.append((t, frame_id))
+                depth_idx += 1
+                if depth_idx % 100 == 0:
+                    print(f"  ⏳ 已提取 Depth: {depth_idx} 帧...")
 
-        # 按时间排序
-        color_list.sort(key=lambda x: x[0])
-        depth_list.sort(key=lambda x: x[0])
-        depth_ts_list = [t for t, _ in depth_list]
+        print(f"  📷 Color: {color_idx} 帧")
+        print(f"  📷 Depth: {depth_idx} 帧")
 
-        print(f"  📷 Color: {len(color_list)} 帧")
-        print(f"  📷 Depth: {len(depth_list)} 帧")
-
-        if len(color_list) == 0:
+        if color_idx == 0:
             print("❌ 无彩色图像，退出")
+            fcsv.close(); fassoc.close()
             return
 
-        cam_csv = out_dir / 'camera_timestamps.csv'
-        assoc_file = out_dir / 'associations.txt'
+        # 排序（rosbag 消息基本有序，但排序确保不出问题）
+        color_frames.sort(key=lambda x: x[0])
+        depth_frames.sort(key=lambda x: x[0])
 
-        # 对每张 Color 找最近的 Depth 做时间对齐
-        with open(cam_csv, 'w', newline='') as fcsv, \
-             open(assoc_file, 'w') as fassoc:
-            writer = csv.writer(fcsv)
-            writer.writerow(['frame_id', 'timestamp_ms'])
+        # 时序匹配：对每张 Color 找最近 Depth，写 associations.txt
+        depth_ts_list = [t for t, _ in depth_frames]
+        depth_map = dict(depth_frames)  # timestamp -> filename
 
-            for i, (ct, cmsg) in enumerate(color_list):
-                # 找最近 Depth
-                if depth_ts_list:
-                    nearest_dt = min(depth_ts_list, key=lambda dt: abs(dt - ct))
-                    dmsg = next(d for t, d in depth_list if t == nearest_dt)
-                else:
-                    dmsg = None
+        for i, (ct, cfile) in enumerate(color_frames):
+            if depth_ts_list:
+                nearest_dt = min(depth_ts_list, key=lambda dt: abs(dt - ct))
+                dframe = depth_map[nearest_dt]
+            else:
+                dframe = None
 
-                frame_id = f"{i:06d}.png"
-                ts_ms = ct * 1000
+            ts_ms = ct * 1000
+            csv_writer.writerow([cfile, f"{ts_ms:.4f}"])
+            fassoc.write(f"{ct:.6f} rgb/{cfile} {ct:.6f} depth/{dframe}\n")
 
-                writer.writerow([frame_id, f"{ts_ms:.4f}"])
-                fassoc.write(f"{ct:.6f} rgb/{frame_id} {ct:.6f} depth/{frame_id}\n")
-
-                save_image(cmsg, str(out_dir / 'rgb' / frame_id))
-                if dmsg:
-                    save_image(dmsg, str(out_dir / 'depth' / frame_id))
-
-                if (i + 1) % 100 == 0:
-                    print(f"  ⏳ 已处理 {i + 1}/{len(color_list)} 帧...")
-
-        print(f"  ✅ 图像保存完成: {len(color_list)} 帧")
+        fcsv.close()
+        fassoc.close()
+        print(f"  ✅ 图像提取 + 时序关联完成: {color_idx} 帧")
 
         # ============================================================
         # 3) 提取 IMU (修复时间戳对齐与插值)

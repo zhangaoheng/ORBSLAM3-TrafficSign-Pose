@@ -206,47 +206,128 @@ def visualize_trajectory(times, poses, quats, stats, save_to=None):
 
 
 def main():
+    # 默认文件路径
+    BASE = "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/extracted_data/runs/2026-05-30_19-43-36_mono"
+    TRAJ_DEFAULT = BASE + "/trajectory.txt"
+    KF_DEFAULT   = BASE + "/trajectory_kf.txt"
+
     parser = argparse.ArgumentParser(
-        description="可视化 AllFrames_trajectory.txt（TUM 格式，有真实物理尺度）"
+        description="可视化轨迹文件（全帧 + 关键帧）"
     )
-    parser.add_argument(
-        "trajectory_file",
-        nargs="?",
-        default=None,
-        help="TUM 轨迹文件路径（默认: data/deepseek/lines_all/AllFrames_trajectory.txt）",
-    )
-    parser.add_argument(
-        "--save",
-        default=None,
-        help="保存图表到指定路径（如 trajectory.png）",
-    )
+    parser.add_argument("trajectory", nargs="?", default=None,
+                        help="全帧轨迹文件路径")
+    parser.add_argument("--keyframe", "-k", default=None,
+                        help="关键帧轨迹文件路径")
+    parser.add_argument("--save", default=None,
+                        help="保存图表到指定路径")
     args = parser.parse_args()
 
-    # 默认路径：最近一次运行结果
-    if args.trajectory_file is None:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        default_path = os.path.join(
-            script_dir, "..", "data", "extracted_data",
-            "runs", "2026-05-30_19-43-36_mono", "trajectory.txt"
-        )
-        args.trajectory_file = os.path.normpath(default_path)
-        print(f"📌 使用默认路径（最新运行结果）: {args.trajectory_file}")
+    # 默认：全帧用 trajectory.txt，关键帧用 trajectory_kf.txt
+    traj_path = args.trajectory if args.trajectory else TRAJ_DEFAULT
+    kf_path   = args.keyframe   if args.keyframe   else KF_DEFAULT
 
-    if not os.path.exists(args.trajectory_file):
-        print(f"❌ 找不到文件: {args.trajectory_file}")
-        print("   用法: python visualize_trajectory.py <trajectory_file>")
+    print("=" * 70)
+    print(" 📊 轨迹可视化")
+    print("=" * 70)
+
+    # 加载全帧轨迹
+    if os.path.exists(traj_path):
+        print(f" 📂 全帧: {traj_path}")
+        times, poses, quats = load_tum_trajectory(traj_path)
+        stats = compute_stats(poses, times)
+        print_scale_report(stats, traj_path)
+        has_traj = True
+    else:
+        print(f" ⚠️  全帧轨迹不存在: {traj_path}")
+        has_traj = False
+
+    # 加载关键帧轨迹
+    kf_times, kf_poses, kf_quats = None, None, None
+    if os.path.exists(kf_path):
+        print(f" 📂 关键帧: {kf_path}")
+        kf_times, kf_poses, kf_quats = load_tum_trajectory(kf_path)
+        kf_stats = compute_stats(kf_poses, kf_times)
+        print(f"     帧数: {kf_stats['num_frames']}")
+        has_kf = True
+    else:
+        print(f" ⚠️  关键帧轨迹不存在: {kf_path}")
+        has_kf = False
+
+    if not has_traj and not has_kf:
+        print("❌ 没有可加载的轨迹文件")
         sys.exit(1)
 
-    print(f"📂 正在加载: {args.trajectory_file}")
-    times, poses, quats = load_tum_trajectory(args.trajectory_file)
+    # 绘图
+    fig = plt.figure(figsize=(18, 10))
+    fig.suptitle(f"Trajectory Visualization — {os.path.basename(BASE)}",
+                 fontsize=14, fontweight="bold")
 
-    if len(poses) == 0:
-        print("❌ 轨迹文件为空或格式不正确。")
-        sys.exit(1)
+    # --- 图1: 3D 轨迹 ---
+    ax1 = fig.add_subplot(2, 2, 1, projection="3d")
+    ax1.set_title("3D Trajectory (m)")
+    if has_traj:
+        t_norm = (times - times[0]) / (times[-1] - times[0] + 1e-9)
+        ax1.scatter(poses[:, 0], poses[:, 1], poses[:, 2],
+                    c=t_norm, cmap="plasma", s=2, alpha=0.7, label="All frames")
+        ax1.plot(poses[:, 0], poses[:, 1], poses[:, 2], color="gray", alpha=0.3, linewidth=0.5)
+    if has_kf:
+        ax1.scatter(kf_poses[:, 0], kf_poses[:, 1], kf_poses[:, 2],
+                    c="cyan", s=15, marker="^", alpha=0.9, label="Keyframes", edgecolors="black", linewidth=0.3)
+    if has_traj:
+        ax1.scatter(poses[0, 0], poses[0, 1], poses[0, 2],
+                    c="green", s=100, marker="o", label="Start", edgecolors="white", linewidth=1)
+        ax1.scatter(poses[-1, 0], poses[-1, 1], poses[-1, 2],
+                    c="red", s=100, marker="x", label="End", linewidth=2)
+    ax1.set_xlabel("X (m)"); ax1.set_ylabel("Y (m)"); ax1.set_zlabel("Z (m)")
+    ax1.legend(fontsize=8, loc="upper left")
 
-    stats = compute_stats(poses, times)
-    print_scale_report(stats, args.trajectory_file)
-    visualize_trajectory(times, poses, quats, stats, save_to=args.save)
+    # --- 图2: XY 俯视图 ---
+    ax2 = fig.add_subplot(2, 2, 2)
+    ax2.set_title("Top-Down View (XY)")
+    if has_traj:
+        ax2.scatter(poses[:, 0], poses[:, 1], c=t_norm, cmap="plasma", s=3, alpha=0.7)
+        ax2.plot(poses[:, 0], poses[:, 1], color="gray", alpha=0.3, linewidth=0.5)
+    if has_kf:
+        ax2.scatter(kf_poses[:, 0], kf_poses[:, 1], c="cyan", s=30, marker="^",
+                    alpha=0.9, edgecolors="black", linewidth=0.3)
+        step = max(1, len(kf_poses) // 20)
+        px, py, _, qdx, qdz = make_heading_arrows(kf_poses, kf_quats, step=step, size=0.04)
+        ax2.quiver(px, py, qdx, qdz, angles="xy", scale_units="xy",
+                   scale=1, color="red", width=0.003, alpha=0.7)
+    ax2.set_xlabel("X (m)"); ax2.set_ylabel("Y (m)")
+    ax2.set_aspect("equal", adjustable="datalim")
+    ax2.grid(True, alpha=0.3)
+
+    # --- 图3: XZ 侧视图 ---
+    ax3 = fig.add_subplot(2, 2, 3)
+    ax3.set_title("Side View (XZ)")
+    if has_traj:
+        ax3.scatter(poses[:, 0], poses[:, 2], c=t_norm, cmap="plasma", s=3, alpha=0.7)
+        ax3.plot(poses[:, 0], poses[:, 2], color="gray", alpha=0.3, linewidth=0.5)
+    if has_kf:
+        ax3.scatter(kf_poses[:, 0], kf_poses[:, 2], c="cyan", s=30, marker="^",
+                    alpha=0.9, edgecolors="black", linewidth=0.3)
+    ax3.set_xlabel("X (m)"); ax3.set_ylabel("Z (m)")
+    ax3.grid(True, alpha=0.3)
+
+    # --- 图4: 分量时序 ---
+    ax4 = fig.add_subplot(2, 2, 4)
+    ax4.set_title("Position vs Time")
+    if has_traj:
+        t_rel = times - times[0]
+        ax4.plot(t_rel, poses[:, 0], label="X", linewidth=0.8)
+        ax4.plot(t_rel, poses[:, 1], label="Y", linewidth=0.8)
+        ax4.plot(t_rel, poses[:, 2], label="Z", linewidth=0.8)
+    ax4.set_xlabel("Time (s)"); ax4.set_ylabel("Position (m)")
+    ax4.legend(loc="best"); ax4.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+
+    # 保存或显示
+    save_path = args.save if args.save else BASE + "/trajectory_viz.png"
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    print(f"\n💾 图表已保存至: {save_path}")
+    plt.close()
 
 
 if __name__ == "__main__":

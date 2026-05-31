@@ -1,130 +1,216 @@
-from rosbags.rosbag1 import Reader
-import cv2
-import os
-import numpy as np
-import struct
+#!/usr/bin/env python3
+"""
+改良版：从 ROS1 bag 提取 RealSense D456 数据
+=============================================
+原则：能导出多少是多少，不爆内存，逐帧处理。
 
-def extract_d456_bag_bulletproof(bag_path, output_dir):
-    """
-    终极防弹版：手动解构 ROS1 二进制数据，绕过 rosbags 的内存对齐报错！
-    """
-    img_topics = [
-        '/device_0/sensor_0/Infrared_1/image/data',  # 左目
-        '/device_0/sensor_0/Infrared_2/image/data'   # 右目
-    ]
-    imu_topics = [
-        '/device_0/sensor_2/Gyro_0/imu/data',
-        '/device_0/sensor_2/Accel_0/imu/data'
-    ]
+用法:
+  python3 extract_bag.py <bag_path> <output_dir>
+"""
+
+import sys
+import os
+import struct
+from collections import deque
+
+import cv2
+import numpy as np
+from rosbags.rosbag1 import Reader
+
+
+# ============================================================
+# 配置
+# ============================================================
+TOPIC_LEFT  = '/device_0/sensor_0/Infrared_1/image/data'
+TOPIC_RIGHT = '/device_0/sensor_0/Infrared_2/image/data'
+TOPIC_GYRO  = '/device_0/sensor_2/Gyro_0/imu/data'
+TOPIC_ACCEL = '/device_0/sensor_2/Accel_0/imu/data'
+
+MAX_GYRO_CACHE = 2000      # Gyro 缓存上限（防止内存无限增长）
+PRINT_INTERVAL = 500        # 每 N 条消息打印一次进度
+
+
+def parse_image(rawdata):
+    """手动解析 ROS1 sensor_msgs/Image 二进制"""
+    pos = 0
+    _, sec, nsec, flen = struct.unpack_from('<IIII', rawdata, pos)
+    pos += 16
+    frame_id = rawdata[pos:pos+flen]
+    pos += flen
+
+    ts_ns = int(sec * 1e9 + nsec)
+
+    height, width, elen = struct.unpack_from('<III', rawdata, pos)
+    pos += 12
+    encoding = rawdata[pos:pos+elen].decode('utf-8').strip('\x00')
+    pos += elen
+    _, step, dlen = struct.unpack_from('<BII', rawdata, pos)
+    pos += 9
+    img_bytes = rawdata[pos:pos+dlen]
+
+    if encoding in ('mono8', '8UC1'):
+        arr = np.frombuffer(img_bytes, dtype=np.uint8)
+        img = arr.reshape((height, width))
+    elif encoding in ('mono16', '16UC1'):
+        arr = np.frombuffer(img_bytes, dtype=np.uint16)
+        img = cv2.convertScaleAbs(arr.reshape((height, width)), alpha=(255.0/65535.0))
+    elif encoding == 'rgb8':
+        arr = np.frombuffer(img_bytes, dtype=np.uint8).reshape((height, width, 3))
+        img = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+    else:
+        return ts_ns, None
+
+    return ts_ns, img
+
+
+def parse_imu(rawdata):
+    """解析 ROS1 IMU 消息，返回 (timestamp_ns, wx,wy,wz, ax,ay,az)"""
+    pos = 0
+    _, sec, nsec, flen = struct.unpack_from('<IIII', rawdata, pos)
+    pos += 16 + flen  # skip frame_id
+
+    # orientation (4 doubles)
+    pos += 32
+    # orientation_cov (9 doubles)
+    pos += 72
+    # angular_velocity (3 doubles)
+    wx, wy, wz = struct.unpack_from('<ddd', rawdata, pos)
+    pos += 24
+    # angular_velocity_cov (9 doubles)
+    pos += 72
+    # linear_acceleration (3 doubles)
+    ax, ay, az = struct.unpack_from('<ddd', rawdata, pos)
+
+    ts_ns = int(sec * 1e9 + nsec)
+    return ts_ns, (wx, wy, wz), (ax, ay, az)
+
+
+def extract_bag(bag_path, output_dir):
+    os.makedirs(output_dir, exist_ok=True)
 
     cam0_dir = os.path.join(output_dir, "cam0", "data")
     cam1_dir = os.path.join(output_dir, "cam1", "data")
-    imu_dir = os.path.join(output_dir, "imu0")
-    
+    imu_dir  = os.path.join(output_dir, "imu0")
     os.makedirs(cam0_dir, exist_ok=True)
     os.makedirs(cam1_dir, exist_ok=True)
     os.makedirs(imu_dir, exist_ok=True)
 
-    times_txt_path = os.path.join(output_dir, "times.txt")
-    f_times = open(times_txt_path, 'w')
-
+    # — 输出文件 —
+    times_path  = os.path.join(output_dir, "times.txt")
+    assoc_path  = os.path.join(output_dir, "associations.txt")
     imu_csv_path = os.path.join(imu_dir, "data.csv")
-    with open(imu_csv_path, 'w') as f_imu:
-        f_imu.write("#timestamp [ns],w_RS_S_x [rad s^-1],w_RS_S_y [rad s^-1],w_RS_S_z [rad s^-1],a_RS_S_x [m s^-2],a_RS_S_y [m s^-2],a_RS_S_z [m s^-2]\n")
+    imu_euroc_path = os.path.join(output_dir, "imu.txt")  # Euroc 格式，供 run_real.cc 使用
 
-    count_l, count_r, count_imu = 0, 0, 0
-    gyro_data = {}
+    f_times = open(times_path, 'w')
+    f_assoc = open(assoc_path, 'w')
+    f_imu   = open(imu_csv_path, 'w')
+    f_imu_euroc = open(imu_euroc_path, 'w')
+    f_imu.write("#timestamp [ns],w_RS_S_x [rad s^-1],w_RS_S_y [rad s^-1],"
+                "w_RS_S_z [rad s^-1],a_RS_S_x [m s^-2],a_RS_S_y [m s^-2],"
+                "a_RS_S_z [m s^-2]\n")
+    f_imu_euroc.write("# timestamp_ns w_RS_S_x w_RS_S_y w_RS_S_z a_RS_S_x a_RS_S_y a_RS_S_z\n")
+    f_imu.flush()
 
-    print(f"🚀 开始硬核解析数据包: {bag_path}")
-    print("-" * 30)
+    # — 计数器 —
+    cnt = {'left': 0, 'right': 0, 'imu': 0, 'total': 0, 'errors': 0}
 
-    # 用 rosbags 的 Reader 作为外壳遍历消息，用 struct 解析内容
+    # — Gyro 缓存（定长队列，防止内存爆炸）—
+    gyro_cache = deque()   # 元素: (timestamp_ns, (wx,wy,wz))
+
+    print(f"📂 Bag: {bag_path}")
+    print(f"📁 Output: {output_dir}")
+    print("-" * 40)
+
     with Reader(bag_path) as reader:
         for connection, timestamp, rawdata in reader.messages():
-            if connection.topic in img_topics or connection.topic in imu_topics:
-                try:
-                    pos = 0
-                    _, stamp_sec, stamp_nsec, frame_id_len = struct.unpack_from('<IIII', rawdata, pos)
-                    pos += 16
-                    pos += frame_id_len  # 跳过 frame_id 字符串
-                    
-                    timestamp_ns = int(stamp_sec * 1e9 + stamp_nsec)
-                    
-                    # ⚠️ 必须用整数的纳秒字符串！
-                    timestamp_str = str(timestamp_ns)
+            cnt['total'] += 1
 
-                    if connection.topic in img_topics:
-                        height, width, encoding_len = struct.unpack_from('<III', rawdata, pos)
-                        pos += 12
-                        encoding = rawdata[pos:pos+encoding_len].decode('utf-8').strip('\x00')
-                        pos += encoding_len
-                        is_bigendian, step, data_len = struct.unpack_from('<BII', rawdata, pos)
-                        pos += 9
-                        img_binary = rawdata[pos:pos+data_len]
-                        
-                        if encoding in ['mono8', '8UC1']:
-                            img_array = np.frombuffer(img_binary, dtype=np.uint8)
-                            channels = 1
-                        elif encoding in ['mono16', '16UC1']:
-                            img_array = np.frombuffer(img_binary, dtype=np.uint16)
-                            channels = 1
-                        else:
-                            img_array = np.frombuffer(img_binary, dtype=np.uint8)
-                            channels = 3 
+            if cnt['total'] % PRINT_INTERVAL == 0:
+                print(f"  ⏳ 已处理 {cnt['total']} 条消息 | "
+                      f"左目 {cnt['left']} | 右目 {cnt['right']} | "
+                      f"IMU {cnt['imu']} | 错误 {cnt['errors']}")
 
-                        if channels == 1:
-                            image = img_array.reshape((height, width))
-                        else:
-                            image = img_array.reshape((height, width, channels))
-                            if encoding == 'rgb8': 
-                                image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+            try:
+                topic = connection.topic
 
-                        if image.dtype == np.uint16:
-                            image = cv2.convertScaleAbs(image, alpha=(255.0/65535.0))
-                            
-                        save_filename = f"{timestamp_str}.png"
-                        if connection.topic == img_topics[0]:
-                            cv2.imwrite(os.path.join(cam0_dir, save_filename), image)
-                            count_l += 1
-                            f_times.write(f"{timestamp_str}\n")
-                        else:
-                            cv2.imwrite(os.path.join(cam1_dir, save_filename), image)
-                            count_r += 1
+                # ——— 图像 ———
+                if topic in (TOPIC_LEFT, TOPIC_RIGHT):
+                    ts_ns, img = parse_image(rawdata)
+                    if img is None:
+                        cnt['errors'] += 1
+                        continue
 
-                    elif connection.topic in imu_topics:
-                        pos += 104  # 32 + 72
-                        wx, wy, wz = struct.unpack_from('<ddd', rawdata, pos)
-                        pos += 24
-                        pos += 72
-                        ax, ay, az = struct.unpack_from('<ddd', rawdata, pos)
-                        
-                        if connection.topic == imu_topics[0]:
-                            gyro_data[timestamp_ns] = (wx, wy, wz)
-                            
-                        elif connection.topic == imu_topics[1]:
-                            if gyro_data:
-                                closest_time = min(gyro_data.keys(), key=lambda k: abs(k - timestamp_ns))
-                                if abs(closest_time - timestamp_ns) < 5_000_000:
-                                    g_wx, g_wy, g_wz = gyro_data[closest_time]
-                                    with open(imu_csv_path, 'a') as f_imu:
-                                        f_imu.write(f"{timestamp_ns},{g_wx},{g_wy},{g_wz},{ax},{ay},{az}\n")
-                                    count_imu += 1
-                                    
-                                    keys_to_del = [k for k in gyro_data.keys() if k <= closest_time]
-                                    for k in keys_to_del:
-                                        del gyro_data[k]
+                    fname = f"{ts_ns}.png"
+                    if topic == TOPIC_LEFT:
+                        cv2.imwrite(os.path.join(cam0_dir, fname), img)
+                        ts_s = ts_ns / 1e9
+                        f_times.write(f"{ts_s:.6f} cam0/data/{fname}\n")
+                        f_assoc.write(f"{ts_s:.6f} cam0/data/{fname}\n")
+                        cnt['left'] += 1
+                    else:
+                        cv2.imwrite(os.path.join(cam1_dir, fname), img)
+                        cnt['right'] += 1
 
-                except Exception as e:
-                    pass
+                # ——— Gyro ———
+                elif topic == TOPIC_GYRO:
+                    ts_ns, gyro, _ = parse_imu(rawdata)
+                    gyro_cache.append((ts_ns, gyro))
+                    # 超过上限就丢弃最旧的
+                    if len(gyro_cache) > MAX_GYRO_CACHE:
+                        gyro_cache.popleft()
+
+                # ——— Accel ———
+                elif topic == TOPIC_ACCEL:
+                    ts_ns, _, accel = parse_imu(rawdata)
+
+                    # 找时间最近的 Gyro
+                    best = None
+                    best_dt = None
+                    for gt, gw in gyro_cache:
+                        dt = abs(gt - ts_ns)
+                        if best_dt is None or dt < best_dt:
+                            best_dt = dt
+                            best = (gt, gw)
+
+                    # 时间差小于 5ms 才认为有效
+                    if best is not None and best_dt < 5_000_000:
+                        gt, (wx, wy, wz) = best
+                        ax, ay, az = accel
+                        f_imu.write(f"{ts_ns},{wx},{wy},{wz},{ax},{ay},{az}\n")
+                        f_imu_euroc.write(f"{ts_ns} {wx:.9f} {wy:.9f} {wz:.9f} {ax:.9f} {ay:.9f} {az:.9f}\n")
+                        cnt['imu'] += 1
+
+                        # 清理已配对的 Gyro（删除该时间戳之前的所有 gyro）
+                        while gyro_cache and gyro_cache[0][0] <= gt:
+                            gyro_cache.popleft()
+
+            except Exception as e:
+                cnt['errors'] += 1
+                if cnt['errors'] <= 5:
+                    print(f"  ⚠ 消息 {cnt['total']} 解析失败: {e}")
+
+    # — 收尾 —
     f_times.close()
-    print("-" * 30)
-    print(f"✅ 提取完成！")
-    print(f"📸 左目 (cam0): {count_l} 张")
-    print(f"�� 右目 (cam1): {count_r} 张")
-    print(f"✈️ IMU (imu0): {count_imu} 条数据 -> 存入 imu0/data.csv")
+    f_assoc.close()
+    f_imu.close()
+    f_imu_euroc.close()
+
+    print("-" * 40)
+    print(f"✅ 提取完成！总消息: {cnt['total']}")
+    print(f"📸 左目 (cam0): {cnt['left']} 张")
+    print(f"📸 右目 (cam1): {cnt['right']} 张")
+    print(f"✈️ IMU (imu0):  {cnt['imu']} 条")
+    if cnt['errors']:
+        print(f"⚠  解析失败: {cnt['errors']} 条（已跳过）")
+
+    return cnt
+
 
 if __name__ == '__main__':
-    MY_BAG_FILE = "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/lines2.bag"
-    # 🔥 注意这里的 MY_SAVE_DIR 是没有 implement 的路径，这样能和你的 shell 脚本绝对对齐！
-    MY_SAVE_DIR = "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/lines2"
-    extract_d456_bag_bulletproof(MY_BAG_FILE, MY_SAVE_DIR)
+    if len(sys.argv) >= 3:
+        bag = sys.argv[1]
+        out = sys.argv[2]
+    else:
+        bag = "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/lines2.bag"
+        out = "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/lines2"
+    extract_bag(bag, out)
