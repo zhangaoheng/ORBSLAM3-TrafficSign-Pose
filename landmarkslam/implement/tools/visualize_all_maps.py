@@ -1,5 +1,5 @@
 #!/home/zah/ORB_SLAM3-master/landmarkslam/yolo_venv/bin/python3
-"""可视化所有地图轨迹 + 拼接轨迹"""
+"""可视化所有 7 段地图轨迹"""
 import os, sys
 import numpy as np
 import matplotlib
@@ -23,118 +23,107 @@ def load_traj(path):
 
 base = "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/extracted_data_new/runs/2026-05-31_20-52-36_mono"
 
-# 加载所有地图
+# Load all 7 maps
 map_files = sorted([f for f in os.listdir(base) if f.startswith("map_") and f.endswith("_trajectory.txt")])
 maps = []
 for mf in map_files:
     t, p = load_traj(os.path.join(base, mf))
     mid = int(mf.split("_")[1])
-    maps.append((mid, t, p))
     dist = np.sum(np.linalg.norm(np.diff(p, axis=0), axis=1))
-    print(f"  地图{mid}: {len(t)} KFs, 路程{dist:.1f}m")
+    maps.append((mid, t, p))
+    print(f"  Map {mid}: {len(t)} KFs, path {dist:.1f}m")
 
-# 加载拼接结果
-stitch_file = os.path.join(base, "stitched_trajectory.txt")
-if os.path.exists(stitch_file):
-    st, sp = load_traj(stitch_file)
-    print(f"  拼接后: {len(sp)} KFs, 路程{np.sum(np.linalg.norm(np.diff(sp,axis=0),axis=1)):.1f}m")
+n_maps = len(maps)
+colors = plt.cm.tab10(np.linspace(0, 1, n_maps))
 
-# ========================
-# 图1: 7个地图独立显示 + 拼接图
-# ========================
-fig, axes = plt.subplots(2, 4, figsize=(20, 10), subplot_kw={"projection": "3d"})
-fig.suptitle("7 个地图的独立轨迹 (mono 模式)", fontsize=14)
-
-colors = plt.cm.plasma(np.linspace(0, 1, len(maps)))
+# ========================================================
+# FIGURE 1: 7 individual 3D views (2x4 grid, last slot empty)
+# ========================================================
+fig1 = plt.figure(figsize=(22, 10))
+fig1.suptitle("Individual Map Trajectories (Mono RGB-D)", fontsize=14, fontweight="bold")
 
 for i, (mid, t, p) in enumerate(maps):
-    ax = axes[i // 4][i % 4]
+    ax = fig1.add_subplot(2, 4, i + 1, projection="3d")
     t_norm = (t - t[0]) / (t[-1] - t[0] + 1e-9)
     ax.scatter(p[:,0], p[:,1], p[:,2], c=t_norm, cmap="plasma", s=5, alpha=0.8)
     ax.plot(p[:,0], p[:,1], p[:,2], "gray", alpha=0.3, linewidth=0.5)
-    ax.set_title(f"地图 {mid} ({len(t)} KFs)")
+    ax.set_title(f"Map {mid} ({len(t)} KFs)", fontsize=10)
     ax.set_xlabel("X"); ax.set_ylabel("Y"); ax.set_zlabel("Z")
 
-# 第8个子图：拼接轨迹
-ax = axes[1][3]
-if os.path.exists(stitch_file):
-    st_norm = (st - st[0]) / (st[-1] - st[0] + 1e-9)
-    ax.scatter(sp[:,0], sp[:,1], sp[:,2], c=st_norm, cmap="plasma", s=3, alpha=0.8)
-    ax.plot(sp[:,0], sp[:,1], sp[:,2], "gray", alpha=0.3, linewidth=0.5)
-    ax.set_title(f"拼接后 ({len(sp)} KFs)")
-else:
-    ax.text(0.5, 0.5, "无拼接数据", transform=ax.transAxes)
-ax.set_xlabel("X"); ax.set_ylabel("Y"); ax.set_zlabel("Z")
+# Last subplot: info
+ax = fig1.add_subplot(2, 4, 8)
+ax.axis("off")
+info = "\n".join([f"Map {mid}: {len(t):4d} KFs, {np.sum(np.linalg.norm(np.diff(p,axis=0),axis=1)):.1f}m" for mid, t, p in maps])
+total_kf = sum(len(t) for _,t,_ in maps)
+total_dist = sum(np.sum(np.linalg.norm(np.diff(p,axis=0),axis=1)) for _,_,p in maps)
+ax.text(0.1, 0.7, info, fontsize=9, verticalalignment="top", family="monospace")
+ax.text(0.1, 0.05, f"Total: {total_kf} KFs, {total_dist:.1f}m", fontsize=11, fontweight="bold")
 
 plt.tight_layout()
 plt.savefig(os.path.join(base, "all_maps_3d.png"), dpi=150, bbox_inches="tight")
-print(f"\n✅ 已保存: all_maps_3d.png")
+print(f"\n  Saved: all_maps_3d.png")
 
-# ========================
-# 图2: XY 俯视图 - 所有地图叠加 + 拼接
-# ========================
+# ========================================================
+# FIGURE 2: XY overlay of all 7 maps
+# ========================================================
 fig2, ax2 = plt.subplots(figsize=(14, 10))
-fig2.suptitle("所有地图 XY 俯视图 + 拼接结果", fontsize=14)
+fig2.suptitle("All Map Trajectories Overlay (XY View)", fontsize=14, fontweight="bold")
 
 for i, (mid, t, p) in enumerate(maps):
-    ax2.scatter(p[:,0], p[:,1], c=[colors[i]], s=8, alpha=0.6, label=f"地图 {mid}")
-    ax2.plot(p[:,0], p[:,1], color=colors[i], alpha=0.3, linewidth=0.5)
-
-if os.path.exists(stitch_file):
-    ax2.plot(sp[:,0], sp[:,1], "k-", linewidth=1.5, alpha=0.8, label="拼接轨迹")
-    ax2.scatter(sp[0,0], sp[0,1], c="green", s=100, marker="o", label="起点")
-    ax2.scatter(sp[-1,0], sp[-1,1], c="red", s=100, marker="x", label="终点")
+    label = f"Map {mid} ({len(t)} KFs, {np.sum(np.linalg.norm(np.diff(p,axis=0),axis=1)):.1f}m)"
+    ax2.scatter(p[:,0], p[:,1], c=[colors[i]], s=8, alpha=0.6, label=label)
+    ax2.plot(p[:,0], p[:,1], color=colors[i], alpha=0.4, linewidth=0.8)
 
 ax2.set_xlabel("X (m)")
 ax2.set_ylabel("Y (m)")
-ax2.legend(fontsize=8)
+ax2.legend(fontsize=9, loc="upper left")
 ax2.set_aspect("equal", adjustable="datalim")
 ax2.grid(True, alpha=0.3)
 plt.tight_layout()
 plt.savefig(os.path.join(base, "all_maps_xy.png"), dpi=150, bbox_inches="tight")
-print(f"✅ 已保存: all_maps_xy.png")
+print(f"  Saved: all_maps_xy.png")
 
-# ========================
-# 图3: 拼接轨迹详细分析
-# ========================
-if os.path.exists(stitch_file) and len(sp) > 10:
-    fig3, axes3 = plt.subplots(2, 2, figsize=(16, 10))
-    fig3.suptitle("拼接轨迹详细分析", fontsize=14)
-    
-    # 3D
-    ax = axes3[0][0]
-    ax = fig3.add_subplot(2, 2, 1, projection="3d")
-    st_norm = (st - st[0]) / (st[-1] - st[0] + 1e-9)
-    ax.scatter(sp[:,0], sp[:,1], sp[:,2], c=st_norm, cmap="plasma", s=3, alpha=0.8)
-    ax.plot(sp[:,0], sp[:,1], sp[:,2], "gray", alpha=0.3)
-    ax.set_title("拼接 3D 轨迹"); ax.set_xlabel("X"); ax.set_ylabel("Y"); ax.set_zlabel("Z")
-    
-    # XY
-    ax = axes3[0][1]
-    ax.scatter(sp[:,0], sp[:,1], c=st_norm, cmap="plasma", s=5, alpha=0.8)
-    ax.plot(sp[:,0], sp[:,1], "gray", alpha=0.3)
-    ax.set_title("XY 俯视图"); ax.set_xlabel("X (m)"); ax.set_ylabel("Y (m)")
-    ax.set_aspect("equal", adjustable="datalim"); ax.grid(True, alpha=0.3)
-    
-    # XZ
-    ax = axes3[1][0]
-    ax.scatter(sp[:,0], sp[:,2], c=st_norm, cmap="plasma", s=5, alpha=0.8)
-    ax.plot(sp[:,0], sp[:,2], "gray", alpha=0.3)
-    ax.set_title("XZ 侧视图"); ax.set_xlabel("X (m)"); ax.set_ylabel("Z (m)")
-    ax.grid(True, alpha=0.3)
-    
-    # 分量
-    ax = axes3[1][1]
-    t_rel = st - st[0]
-    ax.plot(t_rel, sp[:,0], label="X", linewidth=0.8)
-    ax.plot(t_rel, sp[:,1], label="Y", linewidth=0.8)
-    ax.plot(t_rel, sp[:,2], label="Z", linewidth=0.8)
-    ax.set_title("位置分量 vs 时间"); ax.set_xlabel("Time (s)"); ax.set_ylabel("Position (m)")
-    ax.legend(); ax.grid(True, alpha=0.3)
-    
+# ========================================================
+# FIGURE 3: Each map in its own window for detailed inspection
+# ========================================================
+print(f"\n  Opening separate windows for each map...")
+for mid, t, p in maps:
+    fig3 = plt.figure(figsize=(12, 8))
+    fig3.suptitle(f"Map {mid} Trajectory", fontsize=14)
+
+    ax1 = fig3.add_subplot(2, 2, 1, projection="3d")
+    t_norm = (t - t[0]) / (t[-1] - t[0] + 1e-9)
+    ax1.scatter(p[:,0], p[:,1], p[:,2], c=t_norm, cmap="plasma", s=8, alpha=0.8)
+    ax1.plot(p[:,0], p[:,1], p[:,2], "gray", alpha=0.3)
+    ax1.set_title("3D View")
+    ax1.set_xlabel("X"); ax1.set_ylabel("Y"); ax1.set_zlabel("Z")
+
+    ax2 = fig3.add_subplot(2, 2, 2)
+    ax2.scatter(p[:,0], p[:,1], c=t_norm, cmap="plasma", s=10, alpha=0.8)
+    ax2.plot(p[:,0], p[:,1], "gray", alpha=0.3)
+    ax2.set_title("XY View")
+    ax2.set_xlabel("X (m)"); ax2.set_ylabel("Y (m)")
+    ax2.set_aspect("equal", adjustable="datalim")
+    ax2.grid(True, alpha=0.3)
+
+    ax3 = fig3.add_subplot(2, 2, 3)
+    ax3.scatter(p[:,0], p[:,2], c=t_norm, cmap="plasma", s=10, alpha=0.8)
+    ax3.plot(p[:,0], p[:,2], "gray", alpha=0.3)
+    ax3.set_title("XZ View")
+    ax3.set_xlabel("X (m)"); ax3.set_ylabel("Z (m)")
+    ax3.grid(True, alpha=0.3)
+
+    ax4 = fig3.add_subplot(2, 2, 4)
+    t_rel = t - t[0]
+    ax4.plot(t_rel, p[:,0], label="X", linewidth=1)
+    ax4.plot(t_rel, p[:,1], label="Y", linewidth=1)
+    ax4.plot(t_rel, p[:,2], label="Z", linewidth=1)
+    ax4.set_title("Position vs Time")
+    ax4.set_xlabel("Time (s)"); ax4.set_ylabel("Position (m)")
+    ax4.legend(); ax4.grid(True, alpha=0.3)
+
     plt.tight_layout()
-    plt.savefig(os.path.join(base, "stitched_analysis.png"), dpi=150, bbox_inches="tight")
-    print(f"✅ 已保存: stitched_analysis.png")
 
-print(f"\n🎨 正在显示交互窗口（关闭窗口退出）...")
+print(f"\n  All images saved to: {base}")
+print(f"  Close plot windows to exit...")
 plt.show()
