@@ -238,8 +238,8 @@ int main(int argc, char **argv)
 
     // ---- 初始化 SLAM ----
     // true = 打开 Pangolin 可视化窗口
-    LOG("Viewer: disabled");
-    ORB_SLAM3::System SLAM(argv[2], argv[3], sensor, false);
+    LOG("Viewer: enabled");
+    ORB_SLAM3::System SLAM(argv[2], argv[3], sensor, true);
     // 全局指针供崩溃处理器使用
     g_slam = &SLAM;
     g_run_dir = run_dir;
@@ -251,6 +251,11 @@ int main(int argc, char **argv)
 
     vector<float> track_times;
     track_times.reserve(n);
+
+    // ---- 追踪每段地图的帧范围 ----
+    vector<int> map_start_frames, map_end_frames;
+    int prev_map_count = 1;
+    map_start_frames.push_back(0);
 
     for (int i = 0; i < n; ++i) {
         double t = cam_ts[i];
@@ -290,6 +295,11 @@ int main(int argc, char **argv)
             }
         } else {
             cv::Mat depth = cv::imread(seq_dir + "/" + depth_files[i], cv::IMREAD_UNCHANGED);
+            // 检查深度图是否损坏（CRC 错误时可能为空或尺寸不匹配）
+            if (depth.empty() || depth.rows != rgb.rows || depth.cols != rgb.cols) {
+                LOG("⚠ 跳过帧[" << i << "]: 深度图损坏 (" << depth_files[i] << ")");
+                continue;
+            }
             if (scale != 1.f) {
                 cv::resize(rgb,   rgb,   cv::Size(rgb.cols   * scale, rgb.rows   * scale));
                 cv::resize(depth, depth, cv::Size(depth.cols * scale, depth.rows * scale));
@@ -323,16 +333,47 @@ int main(int argc, char **argv)
                 string ckpt = run_dir + "/trajectory.txt";
                 if (g_is_mono) SLAM.SaveTrajectoryEuRoC(ckpt);
                 else           SLAM.SaveTrajectoryTUM(ckpt);
+                // 同时也保存每段地图的轨迹
+                auto atlas = SLAM.GetAtlas();
+                if (atlas) {
+                    auto allMaps = atlas->GetAllMaps();
+                    for (auto pMap : allMaps) {
+                        if (!pMap) continue;
+                        auto kfs = pMap->GetAllKeyFrames();
+                        if (kfs.empty()) continue;
+                        string map_file = run_dir + "/map_" + to_string(pMap->GetId()) + "_trajectory.txt";
+                        ofstream f(map_file);
+                        f << fixed;
+                        sort(kfs.begin(), kfs.end(), ORB_SLAM3::KeyFrame::lId);
+                        for (auto pKF : kfs) {
+                            if (pKF->isBad()) continue;
+                            Sophus::SE3f Twc = pKF->GetPoseInverse();
+                            Eigen::Quaternionf q = Twc.unit_quaternion();
+                            Eigen::Vector3f t = Twc.translation();
+                            f << setprecision(6) << pKF->mTimeStamp << " "
+                              << setprecision(7) << t(0) << " " << t(1) << " " << t(2) << " "
+                              << q.x() << " " << q.y() << " " << q.z() << " " << q.w() << endl;
+                        }
+                        f.close();
+                    }
+                }
             }
             // 打印地图状态
             auto atlas = SLAM.GetAtlas();
             if (atlas) {
                 int nm = atlas->CountMaps();
+                if (nm > prev_map_count) {
+                    // 地图数增加了 → 旧地图结束，新地图开始
+                    map_end_frames.push_back(i);
+                    map_start_frames.push_back(i);
+                }
+                prev_map_count = nm;
                 LOG("  地图数=" << nm);
             }
         }
     }
 
+    map_end_frames.push_back(n);
     LOG("所有帧处理完毕，共 " << n << " 帧");
 
     // ---- 保存地图点云 (PLY) ----
@@ -395,6 +436,38 @@ int main(int argc, char **argv)
                 f.close();
                 LOG("✅ 地图" << pMap->GetId() << "轨迹: " << map_file << "  (" << kfs.size() << " KFs)");
                 map_count++;
+            }
+            // 保存地图帧范围汇总
+            {
+                string summary_file = run_dir + "/maps_summary.txt";
+                ofstream sf(summary_file);
+                sf << "map_id  start_frame  end_frame  num_kfs  distance_m" << endl;
+                sf << fixed << setprecision(1);
+                int map_idx = 0;
+                for (auto pMap : allMaps) {
+                    if (!pMap) continue;
+                    auto kfs = pMap->GetAllKeyFrames();
+                    if (kfs.empty()) continue;
+                    int sf_id = (map_idx < (int)map_start_frames.size()) ? map_start_frames[map_idx] : 0;
+                    int ef_id = (map_idx < (int)map_end_frames.size()) ? map_end_frames[map_idx] : n;
+                    // 计算路径长度
+                    float dist = 0;
+                    sort(kfs.begin(), kfs.end(), ORB_SLAM3::KeyFrame::lId);
+                    Sophus::SE3f prev_pose;
+                    for (size_t j = 0; j < kfs.size(); j++) {
+                        if (kfs[j]->isBad()) continue;
+                        Sophus::SE3f Twc = kfs[j]->GetPoseInverse();
+                        if (j > 0) {
+                            dist += (Twc.translation() - prev_pose.translation()).norm();
+                        }
+                        prev_pose = Twc;
+                    }
+                    sf << pMap->GetId() << "  " << sf_id << "  " << ef_id << "  "
+                       << kfs.size() << "  " << dist << endl;
+                    map_idx++;
+                }
+                sf.close();
+                LOG("✅ 地图汇总: " << summary_file);
             }
             LOG("✅ 共保存 " << map_count << " 个地图的轨迹");
         }
