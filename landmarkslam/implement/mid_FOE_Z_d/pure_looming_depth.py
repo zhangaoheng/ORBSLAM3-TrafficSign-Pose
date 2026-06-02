@@ -27,13 +27,20 @@ FRAME_STEP = 15
 # 3. 基础加载函数
 # ==========================================
 def load_saved_rois(txt_path):
-    rois = []
+    rois = {}
     if os.path.exists(txt_path):
         with open(txt_path, 'r') as f:
             for line in f:
-                if line.strip():
-                    x, y, w, h = map(int, line.strip().split(','))
-                    rois.append((x, y, w, h))
+                line = line.strip()
+                if not line: continue
+                parts = line.split()
+                if len(parts) == 2:
+                    fname, coords = parts
+                    x, y, w, h = map(int, coords.split(','))
+                    rois[fname] = (x, y, w, h)
+                else:
+                    x, y, w, h = map(int, line.split(','))
+                    rois[f"frame_{len(rois)}"] = (x, y, w, h)
     return rois
 
 def load_tum_trajectory(traj_path):
@@ -45,7 +52,7 @@ def load_tum_trajectory(traj_path):
             poses[data[0]] = np.array(data[1:]) 
     return poses
 
-def get_closest_pose(target_time, poses_dict, time_thresh=0.03):
+def get_closest_pose(target_time, poses_dict, time_thresh=0.1):
     times = np.array(list(poses_dict.keys()))
     idx = np.argmin(np.abs(times - target_time))
     closest_time = times[idx]

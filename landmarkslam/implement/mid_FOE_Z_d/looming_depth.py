@@ -27,13 +27,20 @@ FRAME_STEP = 10  # 跨帧步长 (拉大基线，建议 5 到 15)
 # 模块 3：基础数据读取函数
 # ==========================================
 def load_saved_rois(txt_path):
-    rois = []
+    rois = {}
     if os.path.exists(txt_path):
         with open(txt_path, 'r') as f:
             for line in f:
-                if line.strip():
-                    x, y, w, h = map(int, line.strip().split(','))
-                    rois.append((x, y, w, h))
+                line = line.strip()
+                if not line: continue
+                parts = line.split()
+                if len(parts) == 2:
+                    fname, coords = parts
+                    x, y, w, h = map(int, coords.split(','))
+                    rois[fname] = (x, y, w, h)
+                else:
+                    x, y, w, h = map(int, line.split(','))
+                    rois[f"frame_{len(rois)}"] = (x, y, w, h)
     return rois
 
 def load_tum_trajectory(traj_path):

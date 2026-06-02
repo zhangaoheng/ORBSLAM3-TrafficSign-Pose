@@ -8,14 +8,20 @@ from tools.mid import extract_four_lines_from_real_image, calculate_rectangle_ce
 
 def load_saved_rois(txt_path):
     """从 txt 文件中加载已经保存的 ROI"""
-    rois = []
+    rois = {}
     if os.path.exists(txt_path):
         with open(txt_path, 'r') as f:
             for line in f:
-                if line.strip():
-                    # 解析逗号分隔的 x,y,w,h
-                    x, y, w, h = map(int, line.strip().split(','))
-                    rois.append((x, y, w, h))
+                line = line.strip()
+                if not line: continue
+                parts = line.split()
+                if len(parts) == 2:
+                    fname, coords = parts
+                    x, y, w, h = map(int, coords.split(','))
+                    rois[fname] = (x, y, w, h)
+                else:
+                    x, y, w, h = map(int, line.split(','))
+                    rois[f"frame_{len(rois)}"] = (x, y, w, h)
         print(f">>> 📂 找到历史标注文件！已成功加载 {len(rois)} 个保存的框。")
     else:
         print(">>> 📝 未找到历史标注文件，将进入【手动标注模式】。")
@@ -38,7 +44,15 @@ def process_sequence_with_cached_rois(folder_path):
     roi_txt_path = os.path.join(folder_path, "saved_rois.txt")
     
     # 3. 加载已经保存的坐标
-    saved_rois = load_saved_rois(roi_txt_path)
+    saved_rois_dict = load_saved_rois(roi_txt_path)
+    # dict -> list
+    saved_rois = []
+    for img_path in images:
+        fname = os.path.basename(img_path)
+        if fname in saved_rois_dict:
+            saved_rois.append(saved_rois_dict[fname])
+        else:
+            saved_rois.append(None)
 
     # 4. 以追加模式打开 txt 文件，准备写入新画的框
     # 如果程序中途退出，已经画好的框也会被安全保存
@@ -54,7 +68,7 @@ def process_sequence_with_cached_rois(folder_path):
         # ==========================================
         # 核心逻辑：判断当前帧是否有保存的框
         # ==========================================
-        if idx < len(saved_rois):
+        if idx < len(saved_rois) and saved_rois[idx] is not None:
             # 已经保存过，直接读取！
             current_roi = saved_rois[idx]
             mode_text = "Auto Loaded"

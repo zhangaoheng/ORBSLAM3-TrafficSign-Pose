@@ -798,9 +798,18 @@ def batch_evaluate_looming():
         log_print("❌ saved_rois 为空，请先运行 process_sequence_with_cached_rois")
         return
     
-    # 从 saved_rois 构建 ROI 多边形列表（用于 fit_plane_from_depth）
+    # dict -> list
+    roi_list = []
+    for i in range(len(images1)):
+        fname = os.path.basename(images1[i])
+        if fname in saved_rois1:
+            roi_list.append(saved_rois1[fname])
+        else:
+            roi_list.append(None)
+    
+    # 从 roi_list 构建 ROI 多边形列表
     roi_polygons = []
-    for roi in saved_rois1:
+    for roi in roi_list:
         if roi is None:
             roi_polygons.append(None)
             continue
@@ -835,12 +844,12 @@ def batch_evaluate_looming():
     for i_near in range(FRAME_STEP, len(images1)):
         i_far = i_near - FRAME_STEP
         
-        if i_near >= len(saved_rois1) or i_far >= len(saved_rois1):
+        if i_near >= len(roi_list) or i_far >= len(roi_list):
             skip_roi += 1
             continue
         
-        roi_near = saved_rois1[i_near] if i_near < len(saved_rois1) else None
-        roi_far = saved_rois1[i_far] if i_far < len(saved_rois1) else None
+        roi_near = roi_list[i_near] if i_near < len(roi_list) else None
+        roi_far = roi_list[i_far] if i_far < len(roi_list) else None
         
         if roi_near is None or roi_far is None:
             skip_roi += 1
@@ -1622,20 +1631,90 @@ def integrate_and_solve_metric_pose():
 
     # ==== 2. Looming 测距 ====
     log_print("\n👉 检验序列 1 (基准) 的连续测距掩码框...")
-    process_sequence_with_cached_rois(FOLDER_PATH_1)
-    
-    log_print("\n🔧 是否需要修正 ROI 标注？在窗口中按 E 编辑错误帧，按 Q 保存并继续。")
-    edit_existing_rois(images1, ROI_PATH_1)
-    
-    saved_rois1 = load_saved_rois(ROI_PATH_1)
-
-    idx1_prev = idx1_base - FRAME_STEP
-    if idx1_prev < 0 or idx1_base >= len(saved_rois1):
-        log_print("❌ Lines1 序列前序帧不足以计算 Looming，请调整 FRAME_STEP 或选取靠后的帧。")
+    # 从 times.txt 加载时间戳
+    times1 = []
+    times_path = os.path.join(os.path.dirname(FOLDER_PATH_1), "times.txt")
+    if os.path.exists(times_path):
+        with open(times_path) as f:
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) >= 2:
+                    times1.append(float(parts[0]))
+    if not times1:
+        log_print("❌ 找不到 times.txt，无法获取时间戳")
         sys.exit(1)
 
-    time1_A = float(os.path.basename(images1[idx1_prev]).replace(".png", "")) / 1e9
-    time1_B = float(os.path.basename(images1[idx1_base]).replace(".png", "")) / 1e9
+    # ROI dict -> list
+    saved_rois1 = load_saved_rois(ROI_PATH_1)
+    roi_list = []
+    for i in range(len(images1)):
+        fname = os.path.basename(images1[i])
+        if fname in saved_rois1:
+            roi_list.append(saved_rois1[fname])
+        else:
+            roi_list.append(None)
+
+    # 回放标注结果（四线检测 + 中心点，A/D 翻页，Q 继续）
+    log_print("\n🔍 正在回放标注结果 (四线检测+中心)... (A/D 翻页，Q 继续)")
+    cv2.namedWindow("ROI Review", cv2.WINDOW_NORMAL)
+    r_idx = 0
+    while True:
+        img = cv2.imread(images1[r_idx])
+        if img is not None:
+            disp = img.copy()
+            roi = roi_list[r_idx]
+            if roi:
+                lines = extract_four_lines_from_real_image(img, roi)
+                if lines is not None:
+                    line_top, line_bottom, line_left, line_right = lines
+                    center, corners = calculate_rectangle_center(
+                        line_top, line_bottom, line_left, line_right)
+                    if center is not None and corners is not None:
+                        tl, tr, bl, br = corners
+                        cv2.polylines(disp, [np.array([tl, tr, br, bl])],
+                                      isClosed=True, color=(0, 255, 255), thickness=1)
+                        cv2.line(disp, (line_top[0], line_top[1]),
+                                 (line_top[2], line_top[3]), (255, 0, 0), 1)
+                        cv2.line(disp, (line_bottom[0], line_bottom[1]),
+                                 (line_bottom[2], line_bottom[3]), (255, 0, 0), 1)
+                        cv2.line(disp, (line_left[0], line_left[1]),
+                                 (line_left[2], line_left[3]), (255, 0, 0), 1)
+                        cv2.line(disp, (line_right[0], line_right[1]),
+                                 (line_right[2], line_right[3]), (255, 0, 0), 1)
+                        for pt in [tl, tr, br, bl]:
+                            cv2.circle(disp, pt, 5, (0, 255, 255), -1)
+                        cv2.line(disp, tl, br, (0, 255, 0), 1)
+                        cv2.line(disp, tr, bl, (0, 255, 0), 1)
+                        cx, cy = center
+                        cv2.line(disp, (cx-20, cy), (cx+20, cy), (0, 0, 255), 2)
+                        cv2.line(disp, (cx, cy-20), (cx, cy+20), (0, 0, 255), 2)
+                        cv2.circle(disp, center, 4, (0, 0, 255), -1)
+                        mode = "Geometry OK"
+                    else:
+                        mode = "Center lost"
+                else:
+                    mode = "Lines lost"
+            else:
+                mode = "No ROI"
+            status = f"Frame {r_idx}/{len(images1)-1} {os.path.basename(images1[r_idx])} | {mode}"
+            cv2.putText(disp, status, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            cv2.putText(disp, "[A]Prev [D]Next [Q]Continue", (10, disp.shape[0]-10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            cv2.imshow("ROI Review", disp)
+        key = cv2.waitKey(0) & 0xFF
+        if key == ord('q'): break
+        elif key == ord('d') or key == 83: r_idx = (r_idx + 1) % len(images1)
+        elif key == ord('a') or key == 81: r_idx = (r_idx - 1) % len(images1)
+    cv2.destroyWindow("ROI Review")
+    log_print("✅ 标注回放完成")
+
+    idx1_prev = idx1_base - FRAME_STEP
+    if idx1_prev < 0 or idx1_base >= len(roi_list) or roi_list[idx1_base] is None or roi_list[idx1_prev] is None:
+        log_print("❌ 所选帧或前序帧无 ROI 标注，请选取靠后的帧")
+        sys.exit(1)
+
+    time1_A = times1[idx1_prev]
+    time1_B = times1[idx1_base]
 
     pose1_A = get_closest_pose(time1_A, slam_poses1)
     pose1_B = get_closest_pose(time1_B, slam_poses1)
@@ -1654,8 +1733,8 @@ def integrate_and_solve_metric_pose():
     img1_A = cv2.imread(images1[idx1_prev])
     img1_B = cv2.imread(images1[idx1_base])
     
-    lines1_A = extract_four_lines_from_real_image(img1_A, saved_rois1[idx1_prev])
-    lines1_B = extract_four_lines_from_real_image(img1_B, saved_rois1[idx1_base])
+    lines1_A = extract_four_lines_from_real_image(img1_A, roi_list[idx1_prev])
+    lines1_B = extract_four_lines_from_real_image(img1_B, roi_list[idx1_base])
     if not lines1_A or not lines1_B: 
         log_print("❌ 序列 1 提取 ROI 框失败")
         sys.exit(1)
