@@ -76,6 +76,10 @@ if has_aligned:
     _, p19 = load_traj(aligned_files[1])
     print(f"  对齐数据: Map03={len(p03)} KFs, Map19_aligned={len(p19)} KFs")
 
+# 统一输出到 runs/viz 目录
+viz_dir = os.path.join(run_dir, "viz") if run_dir else os.path.join(base, "viz")
+os.makedirs(viz_dir, exist_ok=True)
+
 # 显示各段
 for name, color, (ts, pts) in datasets:
     dist = np.sum(np.linalg.norm(np.diff(pts, axis=0), axis=1))
@@ -92,7 +96,7 @@ for name, color, (ts, pts) in datasets:
     ax.scatter(*pts[-1, :2], c="red",   s=100, marker="x", label="End")
     ax.set_xlabel("X (m)"); ax.set_ylabel("Y (m)")
     ax.legend(); ax.set_aspect("equal"); ax.grid(True, alpha=0.3)
-    out = f"{base}/{name.lower().replace(' ', '_')}.png"
+    out = os.path.join(viz_dir, f"{name.lower().replace(' ', '_')}.png")
     plt.savefig(out, dpi=150, bbox_inches="tight")
     print(f"    → {out}")
 
@@ -111,7 +115,7 @@ if has_aligned:
     ax.scatter(p19[-1,0], p19[-1,1], c="darkred", s=100, marker="x")
     ax.set_xlabel("X (m)"); ax.set_ylabel("Y (m)")
     ax.legend(); ax.set_aspect("equal"); ax.grid(True, alpha=0.3)
-    out = f"{base}/merged_trajectories.png"
+    out = os.path.join(viz_dir, "merged_trajectories.png")
     plt.savefig(out, dpi=150, bbox_inches="tight")
     print(f"    → {out}")
 else:
@@ -133,7 +137,7 @@ ax.scatter(g2[0, 0], g2[0, 1], c="darkred", s=150, marker="o", label="Start 19")
 ax.scatter(g2[-1,0], g2[-1,1], c="darkred", s=100, marker="x")
 ax.set_xlabel("East (m)"); ax.set_ylabel("North (m)")
 ax.legend(); ax.set_aspect("equal"); ax.grid(True, alpha=0.3)
-out = f"{base}/gps_overlay.png"
+out = os.path.join(viz_dir, "gps_overlay.png")
 plt.savefig(out, dpi=150, bbox_inches="tight")
 print(f"    → {out}")
 
