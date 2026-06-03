@@ -1752,7 +1752,150 @@ def integrate_and_solve_metric_pose():
     log_print("\n🎨 正在启动带有真实纸张物理形变的 3D 窗口...")
     visualize_3d_scene(best_R, t_real, best_n, d, K, roi_target)
 
-    # ==== 7. 精度评估（跳过：跨地图坐标系不同，无物理意义） ====
+    # ==== 7. 轨迹对齐可视化（best_R + t_real 作为桥梁） ====
+    log_print("\n" + "="*60)
+    log_print(" 🗺️  轨迹对齐：将两段轨迹拼到同一坐标系")
+    log_print("="*60)
+    
+    traj1_poses = load_tum_trajectory(TRAJ_PATH_1)
+    traj2_poses = load_tum_trajectory(TRAJ_PATH_2)
+    
+    # Step 1: 获取路牌对应帧的 SLAM 位姿
+    # map_03: 帧 idx1_base 的世界位姿 T_w0_c0
+    time_B = times1[idx1_base]
+    pose_w0_c0 = get_closest_pose(time_B, traj1_poses)
+    if pose_w0_c0 is None:
+        log_print("❌ 无法从轨迹1获取对应位姿")
+    else:
+        t_w0_c0 = pose_w0_c0[0:3]
+        q_w0_c0 = pose_w0_c0[3:7]
+        R_w0_c0 = R_scipy.from_quat(q_w0_c0).as_matrix()
+        
+        # map_19: 帧 idx2_base 的世界位姿 T_w1_c1
+        # 序列2 的时间戳从 times.txt 或文件名解析
+        time_C = float(os.path.basename(images2[idx2_base]).replace(".png", "")) / 1e9
+        # 尝试从 times2.txt 读取（如果存在）
+        times2_path = os.path.join(os.path.dirname(FOLDER_PATH_2), "times.txt")
+        if os.path.exists(times2_path):
+            with open(times2_path) as f:
+                times2_list = [float(line.strip().split()[0]) for line in f if line.strip()]
+            if idx2_base < len(times2_list):
+                time_C = times2_list[idx2_base]
+        
+        pose_w1_c1 = get_closest_pose(time_C, traj2_poses)
+        if pose_w1_c1 is None:
+            log_print("❌ 无法从轨迹2获取对应位姿")
+        else:
+            t_w1_c1 = pose_w1_c1[0:3]
+            q_w1_c1 = pose_w1_c1[3:7]
+            R_w1_c1 = R_scipy.from_quat(q_w1_c1).as_matrix()
+            
+            # Step 2: 相机 A → 相机 B 的相对位姿 (from test.py)
+            T_c0_c1 = np.eye(4)
+            T_c0_c1[0:3, 0:3] = best_R
+            T_c0_c1[0:3, 3] = t_real.flatten()
+            
+            # Step 3: 计算世界坐标变换 T_w0_w1 = T_w0_c0 * T_c0_c1 * inv(T_w1_c1)
+            T_w0_c0 = np.eye(4)
+            T_w0_c0[0:3, 0:3] = R_w0_c0
+            T_w0_c0[0:3, 3] = t_w0_c0
+            
+            T_w1_c1 = np.eye(4)
+            T_w1_c1[0:3, 0:3] = R_w1_c1
+            T_w1_c1[0:3, 3] = t_w1_c1
+            
+            T_w0_w1 = T_w0_c0 @ T_c0_c1 @ np.linalg.inv(T_w1_c1)
+            
+            # Step 4: 将轨迹2变换到 world-0 坐标系
+            traj2_aligned = []
+            for ts, data in sorted(traj2_poses.items()):
+                t_w1 = data[0:3]
+                q_w1 = data[3:7]
+                T_w1 = np.eye(4)
+                T_w1[0:3, 0:3] = R_scipy.from_quat(q_w1).as_matrix()
+                T_w1[0:3, 3] = t_w1
+                T_w0 = T_w0_w1 @ T_w1
+                traj2_aligned.append(T_w0[0:3, 3])
+            traj2_aligned = np.array(traj2_aligned)
+            
+            # 轨迹1 的点
+            traj1_pts = np.array([data[0:3] for _, data in sorted(traj1_poses.items())])
+            
+            log_print(f"   轨迹1: {len(traj1_pts)} KFs")
+            log_print(f"   轨迹2: {len(traj2_aligned)} KFs (已变换到世界0坐标系)")
+            
+            # 保存对齐后的轨迹数据
+            out_dir = os.path.dirname(__file__)
+            # 轨迹1（原样）
+            with open(os.path.join(out_dir, "trajectory_03.txt"), "w") as f:
+                for ts, data in sorted(traj1_poses.items()):
+                    f.write(f"{ts:.6f} {data[0]:.7f} {data[1]:.7f} {data[2]:.7f} "
+                            f"{data[3]:.7f} {data[4]:.7f} {data[5]:.7f} {data[6]:.7f}\n")
+            # 轨迹2（变换后）
+            with open(os.path.join(out_dir, "trajectory_19_aligned.txt"), "w") as f:
+                for ts, data in sorted(traj2_poses.items()):
+                    t_w1 = data[0:3]
+                    q_w1 = data[3:7]
+                    T_w1 = np.eye(4)
+                    T_w1[0:3, 0:3] = R_scipy.from_quat(q_w1).as_matrix()
+                    T_w1[0:3, 3] = t_w1
+                    T_w0 = T_w0_w1 @ T_w1
+                    f.write(f"{ts:.6f} {T_w0[0,3]:.7f} {T_w0[1,3]:.7f} {T_w0[2,3]:.7f} "
+                            f"{data[3]:.7f} {data[4]:.7f} {data[5]:.7f} {data[6]:.7f}\n")
+            # 变换矩阵
+            with open(os.path.join(out_dir, "alignment_transform.txt"), "w") as f:
+                np.savetxt(f, T_w0_w1, fmt="%.8f")
+            log_print(f"✅ 对齐数据已保存: trajectory_03.txt, trajectory_19_aligned.txt, alignment_transform.txt")
+            log_print(f"   T_w0_w1 =\n{np.round(T_w0_w1, 3)}")
+            
+            # 可视化
+            fig_align = plt.figure(figsize=(14, 10))
+            fig_align.suptitle("Trajectory Alignment via Road Sign Bridge", fontsize=14)
+            
+            ax = fig_align.add_subplot(2, 2, 1, projection="3d")
+            ax.plot(traj1_pts[:,0], traj1_pts[:,1], traj1_pts[:,2], "b-", label="Map 03", alpha=0.8)
+            ax.plot(traj2_aligned[:,0], traj2_aligned[:,1], traj2_aligned[:,2], "r-", label="Map 19", alpha=0.8)
+            ax.set_title("3D Aligned"); ax.set_xlabel("X"); ax.set_ylabel("Y"); ax.set_zlabel("Z")
+            ax.legend()
+            
+            ax = fig_align.add_subplot(2, 2, 2)
+            ax.plot(traj1_pts[:,0], traj1_pts[:,1], "b-", label="Map 03", alpha=0.8)
+            ax.plot(traj2_aligned[:,0], traj2_aligned[:,1], "r-", label="Map 19", alpha=0.8)
+            ax.scatter(*t_w0_c0[0:2], c="green", s=100, marker="o", label="Anchor frame 03")
+            ax.scatter(T_w0_w1[0,3], T_w0_w1[1,3], c="orange", s=100, marker="o", label="Anchor frame 19")
+            ax.set_title("XY Aligned"); ax.set_xlabel("X (m)"); ax.set_ylabel("Y (m)")
+            ax.set_aspect("equal"); ax.legend(); ax.grid(True, alpha=0.3)
+            
+            ax = fig_align.add_subplot(2, 2, 3)
+            ax.plot(traj1_pts[:,0], traj1_pts[:,2], "b-", label="Map 03", alpha=0.8)
+            ax.plot(traj2_aligned[:,0], traj2_aligned[:,2], "r-", label="Map 19", alpha=0.8)
+            ax.set_title("XZ Aligned"); ax.set_xlabel("X (m)"); ax.set_ylabel("Z (m)")
+            ax.legend(); ax.grid(True, alpha=0.3)
+            
+            ax = fig_align.add_subplot(2, 2, 4)
+            ax.axis("off")
+            info = [
+                f"T_w0_w1 (from test.py bridge):",
+                f"R = {np.round(T_w0_w1[0:3,0:3], 3)}",
+                f"t = {np.round(T_w0_w1[0:3,3], 3)} m",
+                f"",
+                f"Map 03: {len(traj1_pts)} KFs",
+                f"Map 19: {len(traj2_aligned)} KFs",
+                f"Looming Z: {Z_looming:.3f} m",
+                f"|t_real|: {np.linalg.norm(t_real):.3f} m",
+            ]
+            ax.text(0.05, 0.95, "\n".join(info), fontsize=10, fontfamily="monospace",
+                    verticalalignment="top", transform=ax.transAxes)
+            
+            plt.tight_layout()
+            align_path = os.path.join(os.path.dirname(__file__), "trajectory_alignment.png")
+            plt.savefig(align_path, dpi=150, bbox_inches="tight")
+            log_print(f"✅ 轨迹对齐图已保存: {align_path}")
+            log_print("   🖱️  关闭 3D 窗口后，轨迹对齐窗口将弹出（可拖拽查看）")
+            if not QUIET_MODE:
+                plt.show()  # 阻塞：关闭窗口才继续
+
+    log_print(f"\n✅ [EXPERIMENT COMPLETE] Results saved to {LOG_FILE_PATH}")
     log_print(f"\n✅ [EXPERIMENT COMPLETE] Results saved to {LOG_FILE_PATH}")
 
 
