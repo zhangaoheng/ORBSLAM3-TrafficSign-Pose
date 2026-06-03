@@ -666,93 +666,6 @@ def fit_plane_from_depth(depth_dir, img_idx, roi_polygon):
     d_plane = float(np.dot(n, centroid))
     return n, d_plane, fname
 
-def evaluate_accuracy(idx1_prev, idx1_base, idx2_base, Z_looming, dr, delta_d,
-                      best_R, t_real, best_n, roi_target,
-                      traj1_path, traj2_path, depth_dir, roi_path_seq1):
-    log_print("\n\n" + "="*60)
-    log_print("🎯 精度评估开始")
-    log_print("="*60)
-
-    traj1 = _load_tum_list(traj1_path)
-    traj2 = _load_tum_list(traj2_path)
-
-    if idx1_prev >= len(traj1) or idx2_base >= len(traj2):
-        log_print("❌ 轨迹索引超出范围")
-        return
-
-    pose_A_arr = np.array(traj1[idx1_prev][1])
-    pose_C_arr = np.array(traj2[idx2_base][1])
-    R_gt, t_gt = calculate_motion_rt(pose_A_arr, pose_C_arr)
-
-    roi_polygon = None
-    center_x, center_y = None, None
-    if os.path.exists(roi_path_seq1):
-        with open(roi_path_seq1, 'r') as f:
-            lines = f.readlines()
-        if idx1_base < len(lines):
-            roi_line = lines[idx1_base].strip()
-            coords = [int(float(x)) for x in re.split(r'[ ,\t]+', roi_line) if x != '']
-            if len(coords) >= 4:
-                if len(coords) == 8:
-                    pts = np.array([[coords[i], coords[i+1]] for i in range(0, 8, 2)])
-                elif len(coords) == 4:
-                    cx_r = coords[0] + coords[2] / 2.0
-                    cy_r = coords[1] + coords[3] / 2.0
-                    pts = np.array([[coords[0], coords[1]],
-                                    [coords[0] + coords[2], coords[1]],
-                                    [coords[0] + coords[2], coords[1] + coords[3]],
-                                    [coords[0], coords[1] + coords[3]]])
-                else:
-                    pts = None
-                if pts is not None:
-                    center = np.mean(pts, axis=0)
-                    center_x, center_y = center[0], center[1]
-                    roi_polygon = pts.astype(int).tolist()
-
-    if center_x is None:
-        center_x, center_y = np.mean(roi_target, axis=0)
-        roi_polygon = roi_target.tolist()
-
-    Z_gt, depth_fname = get_gt_depth(depth_dir, idx1_base, center_x, center_y)
-    if Z_gt is not None:
-        log_print(f"📏 深度真值 (帧{idx1_base}): {Z_gt:.4f} m   (深度图: {depth_fname})")
-        err_abs = abs(Z_looming - Z_gt)
-        err_rel = err_abs / Z_gt * 100
-        log_print(f"✅ Looming 深度误差: {err_abs:.4f} m, 相对误差: {err_rel:.2f}%")
-
-    n_gt = None
-    if roi_polygon is not None and depth_dir:
-        n_gt, _, _ = fit_plane_from_depth(depth_dir, idx1_base, roi_polygon)
-
-    t_est_vec = t_real.flatten()
-    t_err = np.linalg.norm(t_est_vec - t_gt)
-    gt_len = np.linalg.norm(t_gt)
-    t_err_rel = t_err / gt_len * 100 if gt_len > 0 else 0
-    R_diff = best_R.T @ R_gt
-    rot_err_rad = np.arccos(np.clip((np.trace(R_diff) - 1) / 2.0, -1, 1))
-    rot_err_deg = math.degrees(rot_err_rad)
-
-    log_print(f"\n--- 跨序列绝对位姿精度 ---")
-    log_print(f"真实平移 t_gt: {t_gt.flatten()} m")
-    log_print(f"估计平移 t_est: {t_est_vec}")
-    log_print(f"平移误差 (欧式距离): {t_err:.4f} m, 相对错误: {t_err_rel:.2f}%")
-    log_print(f"真实旋转矩阵 R_gt:\n{np.round(R_gt, 4)}")
-    log_print(f"估计旋转矩阵 R_est:\n{np.round(best_R, 4)}")
-    log_print(f"旋转误差: {rot_err_deg:.4f}°")
-
-    if n_gt is not None:
-        angle = math.degrees(math.acos(min(np.abs(np.dot(best_n, n_gt)), 1.0)))
-        log_print(f"\n--- 正交筛选验证 ---")
-        log_print(f"真实法向量 n_gt: {np.round(n_gt, 4)}")
-        log_print(f"估计法向量 n_est (best_n): {np.round(best_n, 4)}")
-        log_print(f"法向量夹角: {angle:.2f}°")
-        if angle < 10.0:
-            log_print("🎯 正交筛选成功命中真实解！")
-
-    log_print("\n" + "=" * 60)
-    log_print("精度评估结束")
-    log_print("=" * 60)
-
 # ==============================================================================
 # 🌟 模块 7：批量评估（深度 Z、平面参数 n/d、帧间位姿）
 # ==============================================================================
@@ -1735,10 +1648,8 @@ def integrate_and_solve_metric_pose():
     log_print(" 🛠️ 阶段 1：提取汉字骨架 (提供正交先验数据)")
     log_print("="*40)
 
-    # 从四角点计算 LoFTR 匹配区域 (bounding box)
-    x_vals = [p[0] for p in pts_B]
-    y_vals = [p[1] for p in pts_B]
-    roi_target = [min(x_vals), min(y_vals), max(x_vals), max(y_vals)]
+    # 四角点转为 LoFTR 匹配区域的 numpy 数组
+    roi_target = np.array(pts_B, dtype=np.int32)
     
     cached_lines_pts = cached_data.get('lines_roi', None) if cached_data else None
     h_lines, v_lines, _ = detect_and_filter_lines_plslam(
@@ -1841,28 +1752,7 @@ def integrate_and_solve_metric_pose():
     log_print("\n🎨 正在启动带有真实纸张物理形变的 3D 窗口...")
     visualize_3d_scene(best_R, t_real, best_n, d, K, roi_target)
 
-    # ==== 7. 精度评估 ====
-    if DEPTH_DIR_1 and os.path.isdir(DEPTH_DIR_1):
-        log_print("\n🔍 深度图目录存在，启动自动精度评估...")
-        evaluate_accuracy(
-            idx1_prev=idx1_prev,
-            idx1_base=idx1_base,
-            idx2_base=idx2_base,
-            Z_looming=Z_looming,
-            dr=dr,
-            delta_d=delta_d,
-            best_R=best_R,
-            t_real=t_real,
-            best_n=best_n,
-            roi_target=roi_target,
-            traj1_path=TRAJ_PATH_1,
-            traj2_path=TRAJ_PATH_2,
-            depth_dir=DEPTH_DIR_1,
-            roi_path_seq1=ROI_PATH_1
-        )
-    else:
-        log_print("\n⚠️  深度图目录未配置或不存在，跳过精度评估。")
-
+    # ==== 7. 精度评估（跳过：跨地图坐标系不同，无物理意义） ====
     log_print(f"\n✅ [EXPERIMENT COMPLETE] Results saved to {LOG_FILE_PATH}")
 
 

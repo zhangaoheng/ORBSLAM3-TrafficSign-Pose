@@ -53,6 +53,10 @@ def main():
     def mouse_cb(event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN and len(current_pts) < 4:
             current_pts.append((x, y))
+            # 点满 4 个自动保存
+            if len(current_pts) == 4:
+                annos[images[idx]] = current_pts[:]
+                print(f"  ✅ 帧{idx} {images[idx]}: auto-saved")
     
     win = "Corners | SPACE=start | A/D=prev/next | Q=save"
     cv2.namedWindow(win, cv2.WINDOW_NORMAL)
@@ -88,7 +92,7 @@ def main():
         status = f"Clicking {len(current_pts)+1}/4" if current_pts else f"{idx}/{total-1} {fname}"
         if not current_pts: status += " ✅" if fname in annos else " ❌"
         cv2.putText(disp, status, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        cv2.putText(disp, "[A]prev [D]next [SPACE]start [Q]save",
+        cv2.putText(disp, "[A]prev [D]next [SPACE]start(4pts=auto-save) [Q]save",
                     (10, disp.shape[0]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         cv2.imshow(win, disp)
         
