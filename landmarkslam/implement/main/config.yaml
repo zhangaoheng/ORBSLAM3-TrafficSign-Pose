@@ -19,7 +19,7 @@ Sequence1:
   image_dir: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/test/map_03/rgb"
   depth_dir: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/test/map_03/depth"
   trajectory_path: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/test/map_3_trajectory.txt"
-  roi_path: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/test/map_03/rgb/saved_rois.txt"
+  roi_path: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/test/map_03/rgb/corners.txt"
 
 # 4. 序列 2 (测试数据: map_19)
 Sequence2:

@@ -34,7 +34,11 @@ def load_saved_rois(txt_path):
                 line = line.strip()
                 if not line: continue
                 parts = line.split()
-                if len(parts) == 2:
+                if len(parts) == 5:
+                    fname = parts[0]
+                    pts = [tuple(map(int, p.split(','))) for p in parts[1:5]]
+                    rois[fname] = pts
+                elif len(parts) == 2:
                     fname, coords = parts
                     x, y, w, h = map(int, coords.split(','))
                     rois[fname] = (x, y, w, h)

@@ -1644,73 +1644,55 @@ def integrate_and_solve_metric_pose():
         log_print("❌ 找不到 times.txt，无法获取时间戳")
         sys.exit(1)
 
-    # ROI dict -> list
-    saved_rois1 = load_saved_rois(ROI_PATH_1)
-    roi_list = []
+    # 加载四角点标注 (format: filename x1,y1 x2,y2 x3,y3 x4,y4)
+    corners_dict = load_saved_rois(ROI_PATH_1)
+    corner_list = []
     for i in range(len(images1)):
         fname = os.path.basename(images1[i])
-        if fname in saved_rois1:
-            roi_list.append(saved_rois1[fname])
+        if fname in corners_dict:
+            corner_list.append(corners_dict[fname])
         else:
-            roi_list.append(None)
+            corner_list.append(None)
 
-    # 回放标注结果（四线检测 + 中心点，A/D 翻页，Q 继续）
-    log_print("\n🔍 正在回放标注结果 (四线检测+中心)... (A/D 翻页，Q 继续)")
-    cv2.namedWindow("ROI Review", cv2.WINDOW_NORMAL)
+    # 回放标注结果（四角点 + 对角线 + 中心，A/D 翻页，Q 继续）
+    log_print("\n🔍 正在回放四角点标注... (A/D 翻页，Q 继续)")
+    cv2.namedWindow("Corners Review", cv2.WINDOW_NORMAL)
     r_idx = 0
     while True:
         img = cv2.imread(images1[r_idx])
         if img is not None:
             disp = img.copy()
-            roi = roi_list[r_idx]
-            if roi:
-                lines = extract_four_lines_from_real_image(img, roi)
-                if lines is not None:
-                    line_top, line_bottom, line_left, line_right = lines
-                    center, corners = calculate_rectangle_center(
-                        line_top, line_bottom, line_left, line_right)
-                    if center is not None and corners is not None:
-                        tl, tr, bl, br = corners
-                        cv2.polylines(disp, [np.array([tl, tr, br, bl])],
-                                      isClosed=True, color=(0, 255, 255), thickness=1)
-                        cv2.line(disp, (line_top[0], line_top[1]),
-                                 (line_top[2], line_top[3]), (255, 0, 0), 1)
-                        cv2.line(disp, (line_bottom[0], line_bottom[1]),
-                                 (line_bottom[2], line_bottom[3]), (255, 0, 0), 1)
-                        cv2.line(disp, (line_left[0], line_left[1]),
-                                 (line_left[2], line_left[3]), (255, 0, 0), 1)
-                        cv2.line(disp, (line_right[0], line_right[1]),
-                                 (line_right[2], line_right[3]), (255, 0, 0), 1)
-                        for pt in [tl, tr, br, bl]:
-                            cv2.circle(disp, pt, 5, (0, 255, 255), -1)
-                        cv2.line(disp, tl, br, (0, 255, 0), 1)
-                        cv2.line(disp, tr, bl, (0, 255, 0), 1)
-                        cx, cy = center
-                        cv2.line(disp, (cx-20, cy), (cx+20, cy), (0, 0, 255), 2)
-                        cv2.line(disp, (cx, cy-20), (cx, cy+20), (0, 0, 255), 2)
-                        cv2.circle(disp, center, 4, (0, 0, 255), -1)
-                        mode = "Geometry OK"
-                    else:
-                        mode = "Center lost"
-                else:
-                    mode = "Lines lost"
+            pts = corner_list[r_idx]
+            if pts is not None and len(pts) == 4:
+                for i, (x, y) in enumerate(pts):
+                    cv2.circle(disp, (x, y), 6, (0, 255, 255), -1)
+                    cv2.putText(disp, str(i+1), (x+8, y+8),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+                for i in range(4):
+                    cv2.line(disp, pts[i], pts[(i+1)%4], (0, 255, 255), 2)
+                cv2.line(disp, pts[0], pts[2], (0, 255, 0), 1)
+                cv2.line(disp, pts[1], pts[3], (0, 255, 0), 1)
+                cx = sum(p[0] for p in pts) // 4
+                cy = sum(p[1] for p in pts) // 4
+                cv2.drawMarker(disp, (cx, cy), (0, 0, 255), cv2.MARKER_CROSS, 20, 2)
+                mode = "4-points OK" if len(pts)==4 else "?"
             else:
-                mode = "No ROI"
-            status = f"Frame {r_idx}/{len(images1)-1} {os.path.basename(images1[r_idx])} | {mode}"
-            cv2.putText(disp, status, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-            cv2.putText(disp, "[A]Prev [D]Next [Q]Continue", (10, disp.shape[0]-10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            cv2.imshow("ROI Review", disp)
+                mode = "No points"
+            cv2.putText(disp, f"{r_idx}/{len(images1)-1} {os.path.basename(images1[r_idx])} | {mode}",
+                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            cv2.putText(disp, "[A]Prev [D]Next [Q]Continue",
+                        (10, disp.shape[0]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            cv2.imshow("Corners Review", disp)
         key = cv2.waitKey(0) & 0xFF
         if key == ord('q'): break
         elif key == ord('d') or key == 83: r_idx = (r_idx + 1) % len(images1)
         elif key == ord('a') or key == 81: r_idx = (r_idx - 1) % len(images1)
-    cv2.destroyWindow("ROI Review")
+    cv2.destroyWindow("Corners Review")
     log_print("✅ 标注回放完成")
 
     idx1_prev = idx1_base - FRAME_STEP
-    if idx1_prev < 0 or idx1_base >= len(roi_list) or roi_list[idx1_base] is None or roi_list[idx1_prev] is None:
-        log_print("❌ 所选帧或前序帧无 ROI 标注，请选取靠后的帧")
+    if idx1_prev < 0 or idx1_base >= len(corner_list) or corner_list[idx1_base] is None or corner_list[idx1_prev] is None:
+        log_print("❌ 所选帧或前序帧无四角点标注，请选取靠后的帧")
         sys.exit(1)
 
     time1_A = times1[idx1_prev]
@@ -1733,14 +1715,11 @@ def integrate_and_solve_metric_pose():
     img1_A = cv2.imread(images1[idx1_prev])
     img1_B = cv2.imread(images1[idx1_base])
     
-    lines1_A = extract_four_lines_from_real_image(img1_A, roi_list[idx1_prev])
-    lines1_B = extract_four_lines_from_real_image(img1_B, roi_list[idx1_base])
-    if not lines1_A or not lines1_B: 
-        log_print("❌ 序列 1 提取 ROI 框失败")
-        sys.exit(1)
-
-    center1_B_looming, _ = calculate_rectangle_center(*lines1_B)
-    center1_A_raw, _ = calculate_rectangle_center(*lines1_A)
+    # 四角点 → 中心点
+    pts_A = corner_list[idx1_prev]
+    pts_B = corner_list[idx1_base]
+    center1_A_raw = (sum(p[0] for p in pts_A)//4, sum(p[1] for p in pts_A)//4)
+    center1_B_looming = (sum(p[0] for p in pts_B)//4, sum(p[1] for p in pts_B)//4)
 
     center1_A_pure = derotate_point(center1_A_raw, R_12.T)
     
@@ -1756,8 +1735,13 @@ def integrate_and_solve_metric_pose():
     log_print(" 🛠️ 阶段 1：提取汉字骨架 (提供正交先验数据)")
     log_print("="*40)
 
+    # 从四角点计算 LoFTR 匹配区域 (bounding box)
+    x_vals = [p[0] for p in pts_B]
+    y_vals = [p[1] for p in pts_B]
+    roi_target = [min(x_vals), min(y_vals), max(x_vals), max(y_vals)]
+    
     cached_lines_pts = cached_data.get('lines_roi', None) if cached_data else None
-    h_lines, v_lines, roi_target = detect_and_filter_lines_plslam(
+    h_lines, v_lines, _ = detect_and_filter_lines_plslam(
         images1[idx1_base], "Image 1: Select Lines ROI", cached_pts=cached_lines_pts
     )
     
