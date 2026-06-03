@@ -49,6 +49,15 @@ def load_gps_enu(path):
 base = "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/test"
 main_dir = "/home/zah/ORB_SLAM3-master/landmarkslam/implement/main"
 
+# 自动找最新 run 目录
+runs_dir = os.path.join(main_dir, "runs")
+run_dir = None
+if os.path.isdir(runs_dir):
+    run_dirs = sorted(os.listdir(runs_dir))
+    if run_dirs:
+        run_dir = os.path.join(runs_dir, run_dirs[-1])
+        print(f"📁 最新 run: {run_dir}")
+
 datasets = [
     ("Map 03 SLAM",      "blue",   load_traj(f"{base}/map_3_trajectory.txt")),
     ("Map 19 SLAM",      "red",    load_traj(f"{base}/map_19_trajectory.txt")),
@@ -58,8 +67,8 @@ datasets = [
 
 # 叠加图（如果对齐数据存在）
 aligned_files = [
-    f"{main_dir}/trajectory_03.txt",
-    f"{main_dir}/trajectory_19_aligned.txt",
+    os.path.join(run_dir, "trajectory_03.txt") if run_dir else "",
+    os.path.join(run_dir, "trajectory_19_aligned.txt") if run_dir else "",
 ]
 has_aligned = all(os.path.exists(f) for f in aligned_files)
 if has_aligned:

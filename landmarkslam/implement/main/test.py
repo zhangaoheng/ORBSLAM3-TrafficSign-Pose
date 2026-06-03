@@ -1542,6 +1542,12 @@ def integrate_and_solve_metric_pose():
     pair_key = make_pair_key(idx1_base, idx2_base)
     cached_data = cache_data.get('pairs', {}).get(pair_key, None)
 
+    # 创建输出目录
+    run_dir = os.path.join(os.path.dirname(__file__), "runs",
+                           datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
+    os.makedirs(run_dir, exist_ok=True)
+    log_print(f"\n📁 输出目录: {run_dir}")
+
     # ==== 2. Looming 测距 ====
     log_print("\n👉 检验序列 1 (基准) 的连续测距掩码框...")
     # 从 times.txt 加载时间戳
@@ -1825,14 +1831,13 @@ def integrate_and_solve_metric_pose():
             log_print(f"   轨迹2: {len(traj2_aligned)} KFs (已变换到世界0坐标系)")
             
             # 保存对齐后的轨迹数据
-            out_dir = os.path.dirname(__file__)
             # 轨迹1（原样）
-            with open(os.path.join(out_dir, "trajectory_03.txt"), "w") as f:
+            with open(os.path.join(run_dir, "trajectory_03.txt"), "w") as f:
                 for ts, data in sorted(traj1_poses.items()):
                     f.write(f"{ts:.6f} {data[0]:.7f} {data[1]:.7f} {data[2]:.7f} "
                             f"{data[3]:.7f} {data[4]:.7f} {data[5]:.7f} {data[6]:.7f}\n")
             # 轨迹2（变换后）
-            with open(os.path.join(out_dir, "trajectory_19_aligned.txt"), "w") as f:
+            with open(os.path.join(run_dir, "trajectory_19_aligned.txt"), "w") as f:
                 for ts, data in sorted(traj2_poses.items()):
                     t_w1 = data[0:3]
                     q_w1 = data[3:7]
@@ -1843,7 +1848,7 @@ def integrate_and_solve_metric_pose():
                     f.write(f"{ts:.6f} {T_w0[0,3]:.7f} {T_w0[1,3]:.7f} {T_w0[2,3]:.7f} "
                             f"{data[3]:.7f} {data[4]:.7f} {data[5]:.7f} {data[6]:.7f}\n")
             # 变换矩阵
-            with open(os.path.join(out_dir, "alignment_transform.txt"), "w") as f:
+            with open(os.path.join(run_dir, "alignment_transform.txt"), "w") as f:
                 np.savetxt(f, T_w0_w1, fmt="%.8f")
             log_print(f"✅ 对齐数据已保存: trajectory_03.txt, trajectory_19_aligned.txt, alignment_transform.txt")
             log_print(f"   T_w0_w1 =\n{np.round(T_w0_w1, 3)}")
@@ -1888,15 +1893,14 @@ def integrate_and_solve_metric_pose():
                     verticalalignment="top", transform=ax.transAxes)
             
             plt.tight_layout()
-            align_path = os.path.join(os.path.dirname(__file__), "trajectory_alignment.png")
+            align_path = os.path.join(run_dir, "trajectory_alignment.png")
             plt.savefig(align_path, dpi=150, bbox_inches="tight")
             log_print(f"✅ 轨迹对齐图已保存: {align_path}")
             log_print("   🖱️  关闭 3D 窗口后，轨迹对齐窗口将弹出（可拖拽查看）")
             if not QUIET_MODE:
                 plt.show()  # 阻塞：关闭窗口才继续
 
-    log_print(f"\n✅ [EXPERIMENT COMPLETE] Results saved to {LOG_FILE_PATH}")
-    log_print(f"\n✅ [EXPERIMENT COMPLETE] Results saved to {LOG_FILE_PATH}")
+    log_print(f"\n✅ [EXPERIMENT COMPLETE] Results saved to {run_dir}")
 
 
 if __name__ == "__main__":
