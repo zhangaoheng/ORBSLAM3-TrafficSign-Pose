@@ -1766,6 +1766,10 @@ def integrate_and_solve_metric_pose():
     traj1_poses = load_tum_trajectory(TRAJ_PATH_1)
     traj2_poses = load_tum_trajectory(TRAJ_PATH_2)
     
+    if not traj2_poses:
+        log_print("⚠️ 轨迹2数据为空，跳过轨迹对齐")
+        traj1_poses.clear()
+    
     # Step 1: 获取路牌对应帧的 SLAM 位姿
     # map_03: 帧 idx1_base 的世界位姿 T_w0_c0
     time_B = times1[idx1_base]

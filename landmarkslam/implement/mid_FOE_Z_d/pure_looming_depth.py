@@ -56,12 +56,15 @@ def load_tum_trajectory(traj_path):
             poses[data[0]] = np.array(data[1:]) 
     return poses
 
-def get_closest_pose(target_time, poses_dict, time_thresh=0.1):
+def get_closest_pose(target_time, poses_dict, time_thresh=0.1, fallback=True):
+    if not poses_dict: return None
     times = np.array(list(poses_dict.keys()))
     idx = np.argmin(np.abs(times - target_time))
     closest_time = times[idx]
     if np.abs(closest_time - target_time) < time_thresh:
         return poses_dict[closest_time]
+    if fallback:
+        return poses_dict[closest_time]  # 阈值外也用最近帧
     return None
 
 def calculate_relative_motion(pose1, pose2):
