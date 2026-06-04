@@ -1625,7 +1625,7 @@ def integrate_and_solve_metric_pose():
     t_near_frame = R_12.T @ t_12
     tx, ty, tz = t_near_frame
     delta_d = tz
-    log_print(f"    [Motion Info] tx: {tx:.4f}, ty: {ty:.4f}, tz(delta_d): {tz:.4f}")
+    log_print(f"    [Motion Info] tx: {tx:.4f}, ty: {ty:.4f}, tz(delta_d): {tz:.4f}  |t|={np.linalg.norm([tx,ty,tz]):.4f} m")
     if delta_d < 0.01: 
         log_print(f"⚠️ 序列 1 运动太小 (delta_d={delta_d:.4f})，无法计算 Looming Z！")
         sys.exit(1)
@@ -1749,6 +1749,7 @@ def integrate_and_solve_metric_pose():
     log_print(f" -> 当下帧专属深度 Z_Looming: {Z_looming:.3f} m")
     log_print(f" -> 摄像机到平面绝对垂直距离 d: {abs(d):.3f} m")
     log_print(f" -> 跨序列真实的绝对平移 t_real (m):\n{t_real}")
+    log_print(f" -> 平移模长 |t_real|: {np.linalg.norm(t_real):.4f} m")
     log_print(f" -> 跨序列的绝对旋转矩阵 R :\n{np.round(best_R, 4)}")
     log_print("="*40)
 

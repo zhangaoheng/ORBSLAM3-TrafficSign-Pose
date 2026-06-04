@@ -9,11 +9,11 @@ Algorithm:
   cache_file: "cache.json"
 
 Sequence1:
-  image_dir: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/test_pairs/pair_02_46/seq1/rgb"
-  depth_dir: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/test_pairs/pair_02_46/seq1/depth"
-  trajectory_path: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/test_pairs/pair_02_46/seq1/trajectory.txt"
-  roi_path: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/test_pairs/pair_02_46/seq1/rgb/corners.txt"
+  image_dir: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/test_pairs/pair_09_54/seq1/rgb"
+  depth_dir: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/test_pairs/pair_09_54/seq1/depth"
+  trajectory_path: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/test_pairs/pair_09_54/seq1/trajectory.txt"
+  roi_path: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/test_pairs/pair_09_54/seq1/rgb/corners.txt"
 
 Sequence2:
-  image_dir: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/test_pairs/pair_02_46/seq2/rgb"
-  trajectory_path: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/test_pairs/pair_02_46/seq2/trajectory.txt"
+  image_dir: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/test_pairs/pair_09_54/seq2/rgb"
+  trajectory_path: "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/test_pairs/pair_09_54/seq2/trajectory.txt"
