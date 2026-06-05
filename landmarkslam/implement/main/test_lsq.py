@@ -1630,24 +1630,124 @@ def integrate_and_solve_metric_pose():
         log_print(f"⚠️ 序列 1 运动太小 (delta_d={delta_d:.4f})，无法计算 Looming Z！")
         sys.exit(1)
 
+    # ==== LSQ 滑动窗口最小二乘 ====
     FOE = (fx * (tx / tz) + cx, fy * (ty / tz) + cy)
     img1_A = cv2.imread(images1[idx1_prev])
     img1_B = cv2.imread(images1[idx1_base])
     
-    # 四角点 → 中心点
-    pts_A = corner_list[idx1_prev]
-    pts_B = corner_list[idx1_base]
-    center1_A_raw = (sum(p[0] for p in pts_A)//4, sum(p[1] for p in pts_A)//4)
-    center1_B_looming = (sum(p[0] for p in pts_B)//4, sum(p[1] for p in pts_B)//4)
+    # 收集窗口内有效帧
+    W_win = FRAME_STEP
+    valid_centers, valid_poses = [], []
+    for k in range(max(0, idx1_base - W_win), idx1_base + 1):
+        if corner_list[k] is None: continue
+        pk = get_closest_pose(times1[k], slam_poses1)
+        if pk is None: continue
+        ck = (sum(p[0] for p in corner_list[k])//4, sum(p[1] for p in corner_list[k])//4)
+        valid_centers.append(ck); valid_poses.append(pk)
 
-    center1_A_pure = derotate_point(center1_A_raw, R_12.T)
-    
-    Z_looming, r1, r2, dr = calculate_pure_looming_Z_v2(center1_B_looming, center1_A_pure, FOE, delta_d)
-    if Z_looming is None: 
-        log_print(f"❌ 序列 1 Looming 计算失败 (膨胀量 dr 太小或为负数)")
+    if len(valid_centers) < 3:
+        log_print(f"❌ 窗口有效帧不足 ({len(valid_centers)}), 至少需要3帧")
         sys.exit(1)
-    
-    log_print(f"[Lines1 内部] ✅ (被动测距模块) FOE 物理深度计算成功: Z = {Z_looming:.3f} m (dr = {dr:.2f}px)")
+
+    # 最小二乘拟合 Z
+    pb = valid_poses[-1]; cb = valid_centers[-1]
+    Rt, tt = calculate_motion_rt(valid_poses[0], pb); tf = Rt.T @ tt
+    FOE_lsq = (fx*tf[0]/tf[2]+cx, fy*tf[1]/tf[2]+cy)
+    rB = math.hypot(cb[0]-FOE_lsq[0], cb[1]-FOE_lsq[1])
+    xs, ys = [], []
+    for i in range(len(valid_centers)-1):
+        Rk, tk = calculate_motion_rt(valid_poses[i], pb); dd = (Rk.T@tk)[2]
+        Hk = K @ Rk.T @ K_inv
+        ph = np.array([*valid_centers[i], 1.0])
+        pp = Hk @ ph; ckp = (pp[0]/pp[2], pp[1]/pp[2])
+        rk = math.hypot(ckp[0]-FOE_lsq[0], ckp[1]-FOE_lsq[1])
+        xs.append(rB-rk); ys.append(rk*dd)
+    xs, ys = np.array(xs), np.array(ys)
+    sum_xx = np.sum(xs**2)
+    if sum_xx < 1e-6: log_print("❌ LSQ退化"); sys.exit(1)
+    Z_looming = np.sum(xs*ys)/sum_xx
+    dr = rB - math.hypot(valid_centers[0][0]-FOE_lsq[0], valid_centers[0][1]-FOE_lsq[1])
+
+    pts_B = corner_list[idx1_base]
+    center1_B_looming = cb
+
+    log_print(f"   [LSQ] {len(valid_centers)}帧  Z={Z_looming:.3f}m  dr={dr:.1f}px")
+    log_print(f"   [Motion] tx={tf[0]:.4f} ty={tf[1]:.4f} tz={tf[2]:.4f} |t|={np.linalg.norm(tf):.4f}m")
+    log_print(f"[Lines1] ✅ LSQ深度 Z={Z_looming:.3f}m")
+
+    # ==== 2.5 GPS 匹配 ====
+    gps_path = os.path.join(os.path.dirname(FOLDER_PATH_1), "..", f"seq1_gps.csv")
+    gps_path = os.path.normpath(gps_path)
+    if os.path.exists(gps_path):
+        gts, glats, glons = [], [], []
+        with open(gps_path) as f:
+            next(f)
+            for line in f:
+                p = line.strip().split(",")
+                if len(p) < 4: continue
+                try: gts.append(float(p[0])); glats.append(float(p[1])); glons.append(float(p[2]))
+                except: pass
+        if gts:
+            gts = np.array(gts); glats=np.array(glats); glons=np.array(glons)
+            v = glats > 0; gts=gts[v]; glats=glats[v]; glons=glons[v]
+            # 匹配每帧图片到最近 GPS
+            log_print(f"\n📡 GPS-图片匹配 ({len(gts)} GPS点 × {len(times1)} 图片):")
+            log_print(f"   选中的3帧:")
+            for label, fi in [("prev", idx1_prev), ("base", idx1_base)]:
+                gi = np.argmin(np.abs(gts - times1[fi]))
+                dt = abs(gts[gi]-times1[fi])*1000
+                log_print(f"     {label} 帧{fi}: GPS({glats[gi]:.6f},{glons[gi]:.6f}) dt={dt:.1f}ms")
+    else:
+        log_print(f"\n⚠️ 无GPS文件: {gps_path}")
+
+    # ==== 2.6 深度图真值提取 ====
+    depth_dir = os.path.join(os.path.dirname(FOLDER_PATH_1), "depth")
+    if os.path.isdir(depth_dir):
+        log_print("\n📏 深度图真值:")
+        depth_files = sorted(os.listdir(depth_dir))
+        if idx1_base < len(depth_files):
+            dpath = os.path.join(depth_dir, depth_files[idx1_base])
+            dmap = cv2.imread(dpath, cv2.IMREAD_UNCHANGED)
+            if dmap is not None:
+                # Z_gt: 路牌中心深度
+                cx_d, cy_d = center1_B_looming
+                x_d, y_d = int(cx_d), int(cy_d)
+                patch = dmap[max(0,y_d-2):y_d+3, max(0,x_d-2):x_d+3]
+                patch = patch[patch > 0]
+                if len(patch) > 0:
+                    Z_gt = np.median(patch) / 1000.0
+                    log_print(f"   Z_gt(中心深度): {Z_gt:.3f}m  |  Z_lsq: {Z_looming:.3f}m  |  误差: {abs(Z_looming-Z_gt):.3f}m")
+                else:
+                    log_print(f"   ⚠️ 中心深度无效")
+                
+                # d_gt: 在四角点区域内拟合平面
+                pts_d = np.array(pts_B)
+                x0, y0 = int(pts_d[:,0].min()), int(pts_d[:,1].min())
+                x1, y1 = int(pts_d[:,0].max()), int(pts_d[:,1].max())
+                x0, y0 = max(0,x0), max(0,y0)
+                x1, y1 = min(dmap.shape[1]-1,x1), min(dmap.shape[0]-1,y1)
+                if x1 > x0 and y1 > y0:
+                    roi_d = dmap[y0:y1+1, x0:x1+1]
+                    roi_d = roi_d.astype(np.float32) / 1000.0
+                    valid_d = roi_d > 0
+                    if np.sum(valid_d) > 10:
+                        yy, xx = np.mgrid[y0:y1+1, x0:x1+1]
+                        xv = xx[roi_d > 0].flatten()
+                        yv = yy[roi_d > 0].flatten()
+                        zv = roi_d[roi_d > 0].flatten()
+                        A = np.column_stack([xv, yv, np.ones_like(xv)])
+                        n_d, _, _, _ = np.linalg.lstsq(A, zv, rcond=None)
+                        a, b, c = n_d
+                        d_gt = abs(c) / np.sqrt(a*a + b*b + 1)
+                        log_print(f"   d_gt(平面距离): {d_gt:.3f}m  |  n_gt: [{a:.4f},{b:.4f},-1]")
+                    else:
+                        log_print(f"   ⚠️ ROI内有效深度不足")
+            else:
+                log_print(f"   ⚠️ 深度图读取失败")
+        else:
+            log_print(f"   ⚠️ 深度图索引越界")
+    else:
+        log_print(f"   ⚠️ 深度图目录不存在: {depth_dir}")
 
     # ==== 3. 汉字骨架 ====
     log_print("\n" + "="*40)
@@ -1905,6 +2005,76 @@ def integrate_and_solve_metric_pose():
             if not QUIET_MODE:
                 plt.show()  # 阻塞：关闭窗口才继续
 
+    # ==== 8. GPS 预测对比 ====
+    log_print("\n"+"="*60)
+    log_print(" 🧪 GPS预测对比: SLAM轨迹 vs 论文路牌方法")
+    log_print("="*60)
+    
+    from math import radians, cos, hypot
+    
+    _g1=os.path.normpath(os.path.join(os.path.dirname(FOLDER_PATH_1),"..","seq1_gps.csv"))
+    _g2=os.path.normpath(os.path.join(os.path.dirname(FOLDER_PATH_2),"..","seq2_gps.csv"))
+    
+    if os.path.exists(_g1) and os.path.exists(_g2):
+        def _lg(path):
+            ts,la,lo=[],[],[]
+            with open(path) as f:
+                next(f)
+                for l in f:
+                    p=l.strip().split(",")
+                    if len(p)<4: continue
+                    try: ts.append(float(p[0])); la.append(float(p[1])); lo.append(float(p[2]))
+                    except: pass
+            a=np.array(ts); b=np.array(la); c=np.array(lo); v=b>0
+            return a[v],b[v],c[v]
+        gt1,la1,lo1=_lg(_g1); gt2,la2,lo2=_lg(_g2)
+        
+        g1i=np.argmin(np.abs(gt1-times1[idx1_base]))
+        g2t0=float(os.path.basename(images2[idx2_base]).replace(".png",""))/1e9
+        tp2f=os.path.join(os.path.dirname(FOLDER_PATH_2),"times.txt")
+        if os.path.exists(tp2f):
+            with open(tp2f) as f: tl=[float(l.strip().split()[0]) for l in f if l.strip()]
+            if idx2_base<len(tl): g2t0=tl[idx2_base]
+        g2i=np.argmin(np.abs(gt2-g2t0))
+        
+        log_print(f"\n📡 seq1路牌GPS: ({la1[g1i]:.6f},{lo1[g1i]:.6f})")
+        log_print(f"📡 seq2路牌GPS真值: ({la2[g2i]:.6f},{lo2[g2i]:.6f})")
+        
+        # 方法A: SLAM轨迹预测 (带尺度修正)
+        tp2=load_tum_trajectory(TRAJ_PATH_2)
+        if tp2:
+            st=list(sorted(tp2.items()))
+            t2f0=float(os.path.basename(images2[0]).replace(".png",""))/1e9
+            if os.path.exists(tp2f):
+                with open(tp2f) as f: tl=[float(l.strip().split()[0]) for l in f if l.strip()]
+                if 0<len(tl): t2f0=tl[0]
+            si0=np.argmin(np.abs(np.array([x[0] for x in st])-t2f0))
+            siE=np.argmin(np.abs(np.array([x[0] for x in st])-g2t0))
+            if si0<len(st) and siE<len(st):
+                sd=st[siE][1][:2]-st[si0][1][:2]
+                # SLAM尺度修正: GPS首尾距离 / SLAM首尾距离
+                gi0=np.argmin(np.abs(gt2-t2f0))
+                giE=np.argmin(np.abs(gt2-gt2[-1]))
+                gps_dlat=(la2[giE]-la2[gi0])*111320
+                gps_dlon=(lo2[giE]-lo2[gi0])*111320*cos(radians(la2[gi0]))
+                gps_dist=hypot(gps_dlat,gps_dlon)
+                slam_siE=np.argmin(np.abs(np.array([x[0] for x in st])-gt2[-1]))
+                slam_dist=hypot(st[slam_siE][1][0]-st[si0][1][0],st[slam_siE][1][1]-st[si0][1][1])
+                sc=gps_dist/max(slam_dist,0.01)
+                sd_scaled=sd*sc
+                gi0=np.argmin(np.abs(gt2-t2f0))
+                cosla=cos(radians(la2[gi0]))
+                predA=(la2[gi0]+sd_scaled[1]/111320, lo2[gi0]+sd_scaled[0]/(111320*cosla))
+                errA=hypot((predA[0]-la2[g2i])*111320,(predA[1]-lo2[g2i])*111320*cosla)
+                log_print(f"\n🔵 方法A(SLAM): scale={sc:.1f}x 预测=({predA[0]:.6f},{predA[1]:.6f}) 误差={errA:.1f}m")
+        
+        # 方法B: 论文路牌 (seq1路牌GPS + 相对位移t_real)
+        cosla=cos(radians(la1[g1i]))
+        predB=(la1[g1i]+t_real.flatten()[1]/111320, lo1[g1i]+t_real.flatten()[0]/(111320*cosla))
+        errB=hypot((predB[0]-la2[g2i])*111320,(predB[1]-lo2[g2i])*111320*cosla)
+        log_print(f"🔴 方法B(论文): 预测=({predB[0]:.6f},{predB[1]:.6f}) 误差={errB:.1f}m")
+        log_print(f"\n📊 {'✅ 论文方法更优!' if errB<errA else '⚠️ SLAM方法更优'} (差{abs(errA-errB):.1f}m)")
+    
     log_print(f"\n✅ [EXPERIMENT COMPLETE] Results saved to {run_dir}")
 
 

@@ -11,8 +11,8 @@ BASE = "/home/zah/ORB_SLAM3-master"
 PAIRS_DIR = os.path.join(BASE, "landmarkslam/implement/data/test_pairs")
 
 # ===== 参数（改这里） =====
-PAIR_NAME = "pair_09_54"
-MANUAL_SCALE = (6.0, 2.2)   # (seq1倍率, seq2倍率), (0,0)=自动
+PAIR_NAME = "pair_16_60"
+MANUAL_SCALE = (0, 0)   # (seq1倍率, seq2倍率), (0,0)=自动
 MATCH_FRAMES = "auto"  # "auto"=自动检测标注帧, 或 [634,649,811] 手动指定
 MIN_STEP = 20                # 方向计算最小有效位移(m)
 # =========================
