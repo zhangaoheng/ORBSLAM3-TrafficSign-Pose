@@ -1,6 +1,25 @@
-import sys
-import os
-import cv2
+#!/usr/bin/env python3
+# ============================================================
+# 文件: test_lsq.py
+# 用途: 滑动窗口最小二乘 Looming 深度恢复 + 完整跨序列 pipeline
+# ============================================================
+# 运行方式:
+#   单对: python3 test_lsq.py
+#   批量: python3 test_lsq.py --batch
+#   静默: python3 test_lsq.py -q
+#
+# 参数:
+#   --batch  遍历 test_pairs 全部数据对
+#   -q       不弹出 GUI 窗口
+#
+# 依赖:
+#   pip3 install opencv-python numpy scipy matplotlib kornia torch
+#
+# 示例:
+#   /home/zah/ORB_SLAM3-master/landmarkslam/yolo_venv/bin/python3 \\
+#       landmarkslam/implement/main/test_lsq.py --batch
+# ============================================================
+import sys, os, cv2
 import numpy as np
 import glob
 import math
@@ -49,24 +68,25 @@ def log_print(*args, **kwargs):
 # 🌟 全局加载 YAML 配置文件
 # ==============================================================================
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
-if not os.path.exists(CONFIG_PATH):
-    log_print(f"❌ 找不到配置文件: {CONFIG_PATH}")
-    sys.exit(1)
 
-with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
-    config = yaml.safe_load(f)
+config, fx, fy, cx, cy, K, K_inv, FRAME_STEP = [None]*8
 
-fx = config['Camera']['fx']
-fy = config['Camera']['fy']
-cx = config['Camera']['cx']
-cy = config['Camera']['cy']
+def reload_global_config():
+    global config, fx, fy, cx, cy, K, K_inv, FRAME_STEP
+    if not os.path.exists(CONFIG_PATH):
+        print(f"❌ 找不到配置文件: {CONFIG_PATH}")
+        sys.exit(1)
+    with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+    fx = config['Camera']['fx']
+    fy = config['Camera']['fy']
+    cx = config['Camera']['cx']
+    cy = config['Camera']['cy']
+    K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float64)
+    K_inv = np.linalg.inv(K)
+    FRAME_STEP = config['Algorithm']['frame_step']
 
-K = np.array([[fx,  0, cx],
-              [ 0, fy, cy],
-              [ 0,  0,  1]], dtype=np.float64)
-K_inv = np.linalg.inv(K)
-
-FRAME_STEP = config['Algorithm']['frame_step']
+reload_global_config()
 
 # ==============================================================================
 # 🌟 中文字体配置（解决 matplotlib 中文显示方框的问题）
@@ -2079,16 +2099,68 @@ def integrate_and_solve_metric_pose():
 
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description="ORB-SLAM3 Looming Metric Solver")
-    parser.add_argument("-q", "--quiet", action="store_true",
-                        help="安静批量模式：遍历序列1所有连续帧对，计算 Looming Z 与深度真值误差，不弹出 GUI")
+    import argparse, shutil
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-q", "--quiet", action="store_true", help="不弹GUI")
+    parser.add_argument("--batch", action="store_true", help="遍历test_pairs全部数据对")
     args = parser.parse_args()
     
     if args.quiet:
         QUIET_MODE = True
-        import matplotlib
-        matplotlib.use('Agg')
-        batch_evaluate_looming()
+        import matplotlib; matplotlib.use('Agg')
+    
+    if args.batch:
+        PAIRS_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__),
+            "..","data","test_pairs"))
+        pairs = sorted([d for d in os.listdir(PAIRS_ROOT) if d.startswith("pair_")
+                        and os.path.isdir(os.path.join(PAIRS_ROOT,d))])
+        if not pairs:
+            print(f"❌ 无数据对: {PAIRS_ROOT}")
+            sys.exit(1)
+        
+        main_config = os.path.join(os.path.dirname(__file__), "config.yaml")
+        bak_config = os.path.join(os.path.dirname(__file__), "config.yaml.bak")
+        if not os.path.exists(bak_config):
+            shutil.copy2(main_config, bak_config)
+        
+        print(f"\n📋 共 {len(pairs)} 对: {', '.join(pairs)}")
+        total_ok, total_fail = 0, 0
+        
+        for pair_name in pairs:
+            pair_config = os.path.join(PAIRS_ROOT, pair_name, "config.yaml")
+            if not os.path.exists(pair_config):
+                print(f"  ⚠️ {pair_name}: 无config")
+                continue
+            
+            # 替换config
+            shutil.copy2(pair_config, main_config)
+            reload_global_config()
+            
+            # 使用 pair 独立缓存
+            config['Algorithm']['cache_file'] = os.path.join(PAIRS_ROOT, pair_name, "cache.json")
+            
+            print(f"\n{'='*60}")
+            print(f"  {pair_name}")
+            print(f"{'='*60}")
+            
+            try:
+                integrate_and_solve_metric_pose()
+                # 移动结果到pair目录
+                runs_dir = os.path.join(os.path.dirname(__file__), "runs")
+                if os.path.isdir(runs_dir):
+                    latest = sorted(os.listdir(runs_dir))[-1] if os.listdir(runs_dir) else None
+                    if latest:
+                        dst = os.path.join(PAIRS_ROOT, pair_name, "lsq_results", latest)
+                        os.makedirs(os.path.dirname(dst), exist_ok=True)
+                        shutil.move(os.path.join(runs_dir, latest), dst)
+                total_ok += 1
+            except Exception as e:
+                print(f"  ❌ 失败: {e}")
+                total_fail += 1
+            
+            plt.close('all')
+        
+        shutil.copy2(bak_config, main_config)
+        print(f"\n✅ 完成: {total_ok}成功 {total_fail}失败")
     else:
         integrate_and_solve_metric_pose()
