@@ -68,9 +68,13 @@ def copy_map(map_id, dest_seq_dir):
     for subdir in ["rgb", "depth"]:
         src_sub = os.path.join(src, subdir)
         dst_sub = os.path.join(dest_seq_dir, subdir)
-        if os.path.isdir(src_sub) and not os.path.exists(dst_sub):
-            # 用绝对路径符号链接（避免相对路径断了）
-            os.symlink(os.path.abspath(src_sub), dst_sub)
+        if os.path.isdir(src_sub):
+            # 删除旧的损坏链接（如果存在）
+            if os.path.islink(dst_sub):
+                os.unlink(dst_sub)
+            # 使用 realpath 获取 WSL 兼容的绝对路径
+            real_src = os.path.realpath(src_sub)
+            os.symlink(real_src, dst_sub)
     
     # 读取图片时间范围，按时间戳匹配轨迹
     times_path = os.path.join(src, "times.txt")

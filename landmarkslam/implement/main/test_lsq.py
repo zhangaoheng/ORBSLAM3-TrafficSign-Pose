@@ -2154,7 +2154,7 @@ if __name__ == "__main__":
                         os.makedirs(os.path.dirname(dst), exist_ok=True)
                         shutil.move(os.path.join(runs_dir, latest), dst)
                 total_ok += 1
-            except Exception as e:
+            except (Exception, SystemExit) as e:
                 print(f"  ❌ 失败: {e}")
                 total_fail += 1
             
