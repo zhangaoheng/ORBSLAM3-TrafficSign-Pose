@@ -32,7 +32,7 @@ def llh_to_enu(lat, lon, alt, lat0, lon0, alt0=0):
     return e, n, u
 
 # 读取 CSV
-path = "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/test/gps_record_20260529_113616.csv"
+path = "/home/ehuy/ORBSLAM3-TrafficSign-Pose/test1.csv"
 ts, lats, lons, alts = [], [], [], []
 with open(path) as f:
     next(f)  # skip header
@@ -91,7 +91,7 @@ ax4.set_title("Altitude vs Time"); ax4.set_xlabel("Time (s)"); ax4.set_ylabel("H
 ax4.legend(); ax4.grid(True, alpha=0.3)
 
 plt.tight_layout()
-out = "/home/zah/ORB_SLAM3-master/landmarkslam/implement/data/test/gps_trajectory.png"
+out = "gps_trajectory.png"
 plt.savefig(out, dpi=150, bbox_inches="tight")
 print(f"\nSaved: {out}")
 plt.show()

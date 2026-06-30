@@ -56,7 +56,9 @@ def main():
             # 点满 4 个自动保存
             if len(current_pts) == 4:
                 annos[images[idx]] = current_pts[:]
-                print(f"  ✅ 帧{idx} {images[idx]}: auto-saved")
+                save_annotations(anno_path, annos)  # 实时写盘
+                print(f"  ✅ 帧{idx} {images[idx]}: saved -> {anno_path}")
+                current_pts.clear()  # 清空，避免下次按键误触"放弃"
     
     win = "Corners | SPACE=start | A/D=prev/next | Q=save"
     cv2.namedWindow(win, cv2.WINDOW_NORMAL)
@@ -123,7 +125,7 @@ def main():
     
     cv2.destroyAllWindows()
     save_annotations(anno_path, annos)
-    print(f"\n✅ 保存 {len(annos)} 个标注 → {anno_path}")
+    print(f"\n✅ 共 {len(annos)} 个标注 → {anno_path}")
 
 if __name__ == "__main__":
     main()

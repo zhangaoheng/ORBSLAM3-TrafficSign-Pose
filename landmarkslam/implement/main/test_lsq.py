@@ -1696,7 +1696,7 @@ def integrate_and_solve_metric_pose():
     log_print(f"[Lines1] ✅ LSQ深度 Z={Z_looming:.3f}m")
 
     # ==== 2.5 GPS 匹配 ====
-    gps_path = os.path.join(os.path.dirname(FOLDER_PATH_1), "..", f"seq1_gps.csv")
+    gps_path = os.path.join(os.path.dirname(FOLDER_PATH_1), f"seq1_gps.csv")
     gps_path = os.path.normpath(gps_path)
     if os.path.exists(gps_path):
         gts, glats, glons = [], [], []
@@ -1710,12 +1710,13 @@ def integrate_and_solve_metric_pose():
         if gts:
             gts = np.array(gts); glats=np.array(glats); glons=np.array(glons)
             v = glats > 0; gts=gts[v]; glats=glats[v]; glons=glons[v]
-            # 匹配每帧图片到最近 GPS
+            # 匹配每帧图片到最近 GPS（图片时间戳 ns→s）
+            img_ts_s = np.array(times1) / 1e9
             log_print(f"\n📡 GPS-图片匹配 ({len(gts)} GPS点 × {len(times1)} 图片):")
             log_print(f"   选中的3帧:")
             for label, fi in [("prev", idx1_prev), ("base", idx1_base)]:
-                gi = np.argmin(np.abs(gts - times1[fi]))
-                dt = abs(gts[gi]-times1[fi])*1000
+                gi = np.argmin(np.abs(gts - img_ts_s[fi]))
+                dt = abs(gts[gi]-img_ts_s[fi])*1000
                 log_print(f"     {label} 帧{fi}: GPS({glats[gi]:.6f},{glons[gi]:.6f}) dt={dt:.1f}ms")
     else:
         log_print(f"\n⚠️ 无GPS文件: {gps_path}")
@@ -2032,8 +2033,8 @@ def integrate_and_solve_metric_pose():
     
     from math import radians, cos, hypot
     
-    _g1=os.path.normpath(os.path.join(os.path.dirname(FOLDER_PATH_1),"..","seq1_gps.csv"))
-    _g2=os.path.normpath(os.path.join(os.path.dirname(FOLDER_PATH_2),"..","seq2_gps.csv"))
+    _g1=os.path.normpath(os.path.join(os.path.dirname(FOLDER_PATH_1),"seq1_gps.csv"))
+    _g2=os.path.normpath(os.path.join(os.path.dirname(FOLDER_PATH_2),"seq2_gps.csv"))
     
     if os.path.exists(_g1) and os.path.exists(_g2):
         def _lg(path):
@@ -2049,16 +2050,23 @@ def integrate_and_solve_metric_pose():
             return a[v],b[v],c[v]
         gt1,la1,lo1=_lg(_g1); gt2,la2,lo2=_lg(_g2)
         
-        g1i=np.argmin(np.abs(gt1-times1[idx1_base]))
+        g1i=np.argmin(np.abs(gt1-times1[idx1_base]/1e9))
         g2t0=float(os.path.basename(images2[idx2_base]).replace(".png",""))/1e9
         tp2f=os.path.join(os.path.dirname(FOLDER_PATH_2),"times.txt")
         if os.path.exists(tp2f):
             with open(tp2f) as f: tl=[float(l.strip().split()[0]) for l in f if l.strip()]
-            if idx2_base<len(tl): g2t0=tl[idx2_base]
+            if idx2_base<len(tl): g2t0=tl[idx2_base]/1e9
         g2i=np.argmin(np.abs(gt2-g2t0))
         
         log_print(f"\n📡 seq1路牌GPS: ({la1[g1i]:.6f},{lo1[g1i]:.6f})")
         log_print(f"📡 seq2路牌GPS真值: ({la2[g2i]:.6f},{lo2[g2i]:.6f})")
+        
+        # GPS 真值平移
+        _cosla=cos(radians(la1[g1i]))
+        gps_dlat=(la2[g2i]-la1[g1i])*111320
+        gps_dlon=(lo2[g2i]-lo1[g1i])*111320*_cosla
+        gps_gt=hypot(gps_dlat,gps_dlon)
+        log_print(f"📏 GPS真值平移: {gps_gt:.2f}m (Δlat={gps_dlat:.2f}m, Δlon={gps_dlon:.2f}m)")
         
         # 方法A: SLAM轨迹预测 (带尺度修正)
         tp2=load_tum_trajectory(TRAJ_PATH_2)
@@ -2093,7 +2101,23 @@ def integrate_and_solve_metric_pose():
         predB=(la1[g1i]+t_real.flatten()[1]/111320, lo1[g1i]+t_real.flatten()[0]/(111320*cosla))
         errB=hypot((predB[0]-la2[g2i])*111320,(predB[1]-lo2[g2i])*111320*cosla)
         log_print(f"🔴 方法B(论文): 预测=({predB[0]:.6f},{predB[1]:.6f}) 误差={errB:.1f}m")
+        log_print(f"📐 视觉平移|t_real|={np.linalg.norm(t_real):.2f}m vs GPS真值={gps_gt:.2f}m 误差={abs(np.linalg.norm(t_real)-gps_gt):.2f}m")
         log_print(f"\n📊 {'✅ 论文方法更优!' if errB<errA else '⚠️ SLAM方法更优'} (差{abs(errA-errB):.1f}m)")
+        
+        # GPS轨迹可视化
+        try:
+            fig, ax = plt.subplots(figsize=(12, 10))
+            ax.plot(lo1, la1, 'lightgray', linewidth=0.3, alpha=0.5, label='Full GPS')
+            w = int(60 / 0.063)
+            ax.plot(lo1[max(g1i-w,0):min(g1i+w,len(lo1)-1)], la1[max(g1i-w,0):min(g1i+w,len(la1)-1)], 'blue', linewidth=0.8, label='Seq1 vicinity')
+            ax.plot(lo2[max(g2i-w,0):min(g2i+w,len(lo2)-1)], la2[max(g2i-w,0):min(g2i+w,len(la2)-1)], 'green', linewidth=0.8, label='Seq2 vicinity')
+            ax.scatter([lo1[g1i], lo2[g2i]], [la1[g1i], la2[g2i]], c='red', s=200, zorder=10, edgecolors='k')
+            ax.text(lo1[g1i], la1[g1i], '  Seq1', fontsize=10, color='red', fontweight='bold')
+            ax.text(lo2[g2i], la2[g2i], '  Seq2', fontsize=10, color='red', fontweight='bold')
+            ax.set_title(f'GPS Track | Seq1 vs Seq2 | dt={gt2[g2i]-gt1[g1i]:.0f}s dist={gps_gt:.2f}m')
+            ax.set_xlabel('Longitude'); ax.set_ylabel('Latitude')
+            ax.legend(); ax.axis('equal'); plt.tight_layout(); plt.show()
+        except Exception: pass
     
     log_print(f"\n✅ [EXPERIMENT COMPLETE] Results saved to {run_dir}")
 
