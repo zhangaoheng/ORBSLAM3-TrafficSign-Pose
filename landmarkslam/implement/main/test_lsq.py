@@ -19,13 +19,18 @@
 #   /home/zah/ORB_SLAM3-master/landmarkslam/yolo_venv/bin/python3 \\
 #       landmarkslam/implement/main/test_lsq.py --batch
 # ============================================================
-import sys, os, cv2
+import sys, os, cv2, warnings
+warnings.filterwarnings('ignore', category=SyntaxWarning)
 import numpy as np
 import glob
 import math
 import json
 import re
+import matplotlib; matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
+plt.rcParams['font.family'] = 'sans-serif'
+plt.rcParams['font.sans-serif'] = ['Noto Sans CJK SC', 'WenQuanYi Micro Hei', 'DejaVu Sans']
+plt.rcParams['axes.unicode_minus'] = False
 import torch
 import yaml
 import datetime
@@ -1447,7 +1452,7 @@ def _generate_markdown_report(plot_dir, summary, plot_paths, valid_count, total_
 
 | 指标 | Mean | Median | Min | Max |
 |------|------|--------|-----|-----|
-| \|t\| (m) | {pose_stats.get('t_norm_mean', 0):.4f} | {pose_stats.get('t_norm_median', 0):.4f} | {pose_stats.get('t_norm_min', 0):.4f} | {pose_stats.get('t_norm_max', 0):.4f} |
+| abs(t) (m) | {pose_stats.get('t_norm_mean', 0):.4f} | {pose_stats.get('t_norm_median', 0):.4f} | {pose_stats.get('t_norm_min', 0):.4f} | {pose_stats.get('t_norm_max', 0):.4f} |
 | R_angle (°) | {pose_stats.get('rot_deg_mean', 0):.2f} | {pose_stats.get('rot_deg_median', 0):.2f} | {pose_stats.get('rot_deg_min', 0):.2f} | {pose_stats.get('rot_deg_max', 0):.2f} |
 
 """
@@ -2028,7 +2033,7 @@ def integrate_and_solve_metric_pose():
 
     # ==== 8. GPS 预测对比 ====
     log_print("\n"+"="*60)
-    log_print(" 🧪 GPS预测对比: SLAM轨迹 vs 论文路牌方法")
+    log_print(" 🧪 GPS手动修正 & 预测对比")
     log_print("="*60)
     
     from math import radians, cos, hypot
@@ -2058,66 +2063,104 @@ def integrate_and_solve_metric_pose():
             if idx2_base<len(tl): g2t0=tl[idx2_base]/1e9
         g2i=np.argmin(np.abs(gt2-g2t0))
         
-        log_print(f"\n📡 seq1路牌GPS: ({la1[g1i]:.6f},{lo1[g1i]:.6f})")
-        log_print(f"📡 seq2路牌GPS真值: ({la2[g2i]:.6f},{lo2[g2i]:.6f})")
-        
-        # GPS 真值平移
-        _cosla=cos(radians(la1[g1i]))
-        gps_dlat=(la2[g2i]-la1[g1i])*111320
-        gps_dlon=(lo2[g2i]-lo1[g1i])*111320*_cosla
-        gps_gt=hypot(gps_dlat,gps_dlon)
-        log_print(f"📏 GPS真值平移: {gps_gt:.2f}m (Δlat={gps_dlat:.2f}m, Δlon={gps_dlon:.2f}m)")
-        
-        # 方法A: SLAM轨迹预测 (带尺度修正)
-        tp2=load_tum_trajectory(TRAJ_PATH_2)
-        if tp2:
-            st=list(sorted(tp2.items()))
-            t2f0=float(os.path.basename(images2[0]).replace(".png",""))/1e9
-            if os.path.exists(tp2f):
-                with open(tp2f) as f: tl=[float(l.strip().split()[0]) for l in f if l.strip()]
-                if 0<len(tl): t2f0=tl[0]
-            si0=np.argmin(np.abs(np.array([x[0] for x in st])-t2f0))
-            siE=np.argmin(np.abs(np.array([x[0] for x in st])-g2t0))
-            if si0<len(st) and siE<len(st):
-                sd=st[siE][1][:2]-st[si0][1][:2]
-                # SLAM尺度修正: GPS首尾距离 / SLAM首尾距离
-                gi0=np.argmin(np.abs(gt2-t2f0))
-                giE=np.argmin(np.abs(gt2-gt2[-1]))
-                gps_dlat=(la2[giE]-la2[gi0])*111320
-                gps_dlon=(lo2[giE]-lo2[gi0])*111320*cos(radians(la2[gi0]))
-                gps_dist=hypot(gps_dlat,gps_dlon)
-                slam_siE=np.argmin(np.abs(np.array([x[0] for x in st])-gt2[-1]))
-                slam_dist=hypot(st[slam_siE][1][0]-st[si0][1][0],st[slam_siE][1][1]-st[si0][1][1])
-                sc=gps_dist/max(slam_dist,0.01)
-                sd_scaled=sd*sc
-                gi0=np.argmin(np.abs(gt2-t2f0))
-                cosla=cos(radians(la2[gi0]))
-                predA=(la2[gi0]+sd_scaled[1]/111320, lo2[gi0]+sd_scaled[0]/(111320*cosla))
-                errA=hypot((predA[0]-la2[g2i])*111320,(predA[1]-lo2[g2i])*111320*cosla)
-                log_print(f"\n🔵 方法A(SLAM): scale={sc:.1f}x 预测=({predA[0]:.6f},{predA[1]:.6f}) 误差={errA:.1f}m")
-        
-        # 方法B: 论文路牌 (seq1路牌GPS + 相对位移t_real)
-        cosla=cos(radians(la1[g1i]))
-        predB=(la1[g1i]+t_real.flatten()[1]/111320, lo1[g1i]+t_real.flatten()[0]/(111320*cosla))
-        errB=hypot((predB[0]-la2[g2i])*111320,(predB[1]-lo2[g2i])*111320*cosla)
-        log_print(f"🔴 方法B(论文): 预测=({predB[0]:.6f},{predB[1]:.6f}) 误差={errB:.1f}m")
-        log_print(f"📐 视觉平移|t_real|={np.linalg.norm(t_real):.2f}m vs GPS真值={gps_gt:.2f}m 误差={abs(np.linalg.norm(t_real)-gps_gt):.2f}m")
-        log_print(f"\n📊 {'✅ 论文方法更优!' if errB<errA else '⚠️ SLAM方法更优'} (差{abs(errA-errB):.1f}m)")
-        
-        # GPS轨迹可视化
+        # 朝向对齐：SLAM相机朝向 → GPS速度朝向
+        def get_heading_slam(pose):
+            """从SLAM四元数提取水平朝向(rad, ENU)"""
+            R = R_scipy.from_quat(pose[3:7]).as_matrix()
+            # 相机Z轴朝前，投影到水平面
+            fwd = R @ np.array([0, 0, 1])
+            return np.arctan2(fwd[0], fwd[1])  # East-North heading
+
+        def get_heading_gps(idx, la_arr, lo_arr, r=5):
+            """从GPS速度方向提取朝向(rad)"""
+            i0, i1 = max(idx-r, 0), min(idx+r, len(la_arr)-1)
+            if i1 <= i0: return 0.0
+            dlat = (la_arr[i1] - la_arr[i0]) * 111320
+            dlon = (lo_arr[i1] - lo_arr[i0]) * 111320 * cos(radians(la_arr[idx]))
+            return np.arctan2(dlon, dlat)
+
+        # 计算旋转修正
+        pose1 = get_closest_pose(times1[idx1_base], slam_poses1)
+        heading_slam = get_heading_slam(pose1) if pose1 is not None else 0.0
+        heading_gps  = get_heading_gps(g1i, la1, lo1)
+        rot_angle = heading_gps - heading_slam
+        log_print(f"\n🧭 SLAM朝向={np.degrees(heading_slam):.1f}deg  GPS朝向={np.degrees(heading_gps):.1f}deg  修正={np.degrees(rot_angle):.1f}deg")
+
+        # GPS交互修正可视化 + 对应图片预览
+        gps_gt = 0.0; errB = 0.0
         try:
-            fig, ax = plt.subplots(figsize=(12, 10))
-            ax.plot(lo1, la1, 'lightgray', linewidth=0.3, alpha=0.5, label='Full GPS')
+            _i1, _i2 = g1i, g2i
+            fig = plt.figure(figsize=(16, 12))
+            ax_gps = fig.add_subplot(2, 1, 1)
+            ax_img1 = fig.add_subplot(2, 4, 5); ax_img1.axis('off')
+            ax_img2 = fig.add_subplot(2, 4, 6); ax_img2.axis('off')
+            ax_gps.plot(lo1, la1, 'lightgray', linewidth=0.3, alpha=0.5)
             w = int(60 / 0.063)
-            ax.plot(lo1[max(g1i-w,0):min(g1i+w,len(lo1)-1)], la1[max(g1i-w,0):min(g1i+w,len(la1)-1)], 'blue', linewidth=0.8, label='Seq1 vicinity')
-            ax.plot(lo2[max(g2i-w,0):min(g2i+w,len(lo2)-1)], la2[max(g2i-w,0):min(g2i+w,len(la2)-1)], 'green', linewidth=0.8, label='Seq2 vicinity')
-            ax.scatter([lo1[g1i], lo2[g2i]], [la1[g1i], la2[g2i]], c='red', s=200, zorder=10, edgecolors='k')
-            ax.text(lo1[g1i], la1[g1i], '  Seq1', fontsize=10, color='red', fontweight='bold')
-            ax.text(lo2[g2i], la2[g2i], '  Seq2', fontsize=10, color='red', fontweight='bold')
-            ax.set_title(f'GPS Track | Seq1 vs Seq2 | dt={gt2[g2i]-gt1[g1i]:.0f}s dist={gps_gt:.2f}m')
-            ax.set_xlabel('Longitude'); ax.set_ylabel('Latitude')
-            ax.legend(); ax.axis('equal'); plt.tight_layout(); plt.show()
+            _l1, = ax_gps.plot([], [], 'blue', linewidth=0.8, label='Seq1')
+            _l2, = ax_gps.plot([], [], 'green', linewidth=0.8, label='Seq2')
+            _p1 = ax_gps.scatter([], [], c='red', s=200, zorder=10, edgecolors='k')
+            _p2 = ax_gps.scatter([], [], c='orange', s=200, marker='s', zorder=10, edgecolors='k')
+            _t1 = ax_gps.text(0,0,'', fontsize=10, color='red', fontweight='bold')
+            _t2 = ax_gps.text(0,0,'', fontsize=10, color='orange', fontweight='bold')
+            ax_gps.set_xlabel('Longitude'); ax_gps.set_ylabel('Latitude')
+            ax_gps.legend(); ax_gps.axis('equal')
+
+            def _upd():
+                i1s,i1e=max(_i1-w,0),min(_i1+w,len(lo1)-1)
+                i2s,i2e=max(_i2-w,0),min(_i2+w,len(lo2)-1)
+                _l1.set_data(lo1[i1s:i1e], la1[i1s:i1e])
+                _l2.set_data(lo2[i2s:i2e], la2[i2s:i2e])
+                _p1.set_offsets([[lo1[_i1], la1[_i1]]])
+                _p2.set_offsets([[lo2[_i2], la2[_i2]]])
+                _t1.set_position((lo1[_i1], la1[_i1])); _t1.set_text(f'  GPS[{_i1+2}]')
+                _t2.set_position((lo2[_i2], la2[_i2])); _t2.set_text(f'  GPS[{_i2+2}]')
+                d=hypot((la2[_i2]-la1[_i1])*111320,(lo2[_i2]-lo1[_i1])*111320*cos(radians(la1[_i1])))
+                ax_gps.set_title(f'GPS Correction | Arrows=Seq1  A/D=Seq2 | dist={d:.2f}m | Enter=recalc  ESC=quit')
+                # 显示选中的两帧（固定不变）
+                im1=cv2.cvtColor(cv2.imread(images1[idx1_base]), cv2.COLOR_BGR2RGB)
+                im2=cv2.cvtColor(cv2.imread(images2[idx2_base]), cv2.COLOR_BGR2RGB)
+                ax_img1.imshow(im1); ax_img1.set_title(f'Seq1 frame {idx1_base}')
+                ax_img2.imshow(im2); ax_img2.set_title(f'Seq2 frame {idx2_base}')
+                fig.canvas.draw_idle()
+
+            def _onkey(event):
+                nonlocal _i1, _i2, g1i, g2i, gps_gt, errB
+                if event.key=='right': _i1=min(_i1+1,len(lo1)-1); _upd()
+                elif event.key=='left': _i1=max(_i1-1,0); _upd()
+                elif event.key=='d': _i2=min(_i2+1,len(lo2)-1); _upd()
+                elif event.key=='a': _i2=max(_i2-1,0); _upd()
+                elif event.key in ('enter','return'):
+                    g1i,g2i=_i1,_i2
+                    gps_gt=hypot((la2[g2i]-la1[g1i])*111320,(lo2[g2i]-lo1[g1i])*111320*cos(radians(la1[g1i])))
+                    _cos=cos(radians(la1[g1i]))
+                    # 朝向修正: 旋转t_real到GPS朝向
+                    c, s = cos(rot_angle), sin(rot_angle)
+                    t_east = c*t_real.flatten()[0] - s*t_real.flatten()[1]
+                    t_north = s*t_real.flatten()[0] + c*t_real.flatten()[1]
+                    predB=(la1[g1i]+t_north/111320, lo1[g1i]+t_east/(111320*_cos))
+                    errB=hypot((predB[0]-la2[g2i])*111320,(predB[1]-lo2[g2i])*111320*_cos)
+                    log_print(f'\n📡 seq1 GPS: ({la1[g1i]:.8f},{lo1[g1i]:.8f})')
+                    log_print(f'📡 seq2 GPS: ({la2[g2i]:.8f},{lo2[g2i]:.8f})')
+                    log_print(f'📏 GPS真值: {gps_gt:.2f}m')
+                    log_print(f'📐 |t_real|: {np.linalg.norm(t_real):.2f}m  vs GPS: {gps_gt:.2f}m  diff: {abs(np.linalg.norm(t_real)-gps_gt):.2f}m')
+                    log_print(f'🔴 论文方法(朝向修正{np.degrees(rot_angle):.0f}deg): pred=({predB[0]:.6f},{predB[1]:.6f}) err={errB:.1f}m')
+                    _upd()
+                elif event.key=='escape': plt.close()
+            fig.canvas.mpl_connect('key_press_event', _onkey); _upd(); plt.show()
         except Exception: pass
+        
+        # 汇总对比
+        log_print(f"\n{'='*60}")
+        log_print(f" 📊 汇总 (基于手动修正GPS + 朝向对齐)")
+        log_print(f"{'='*60}")
+        log_print(f"  朝向修正: {np.degrees(rot_angle):.1f}deg (SLAM→GPS)")
+        log_print(f"  seq1 GPS: ({la1[g1i]:.8f}, {lo1[g1i]:.8f})")
+        log_print(f"  seq2 GPS: ({la2[g2i]:.8f}, {lo2[g2i]:.8f})")
+        log_print(f"  GPS真值平移:     {gps_gt:.2f}m")
+        log_print(f"  视觉平移|t_real|: {np.linalg.norm(t_real):.2f}m")
+        log_print(f"  |t_real|误差:     {abs(np.linalg.norm(t_real)-gps_gt):.2f}m")
+        log_print(f"  论文方法预测误差: {errB:.2f}m")
+        log_print(f"{'='*60}")
     
     log_print(f"\n✅ [EXPERIMENT COMPLETE] Results saved to {run_dir}")
 

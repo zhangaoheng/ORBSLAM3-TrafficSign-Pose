@@ -1,0 +1,182 @@
+\documentclass[12pt,a4paper]{ctexart}
+
+\usepackage{geometry}\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+\usepackage{graphicx,amsmath,amssymb,booktabs,hyperref,enumitem}
+\usepackage{listings,xcolor}\lstset{basicstyle=\ttfamily\small,breaklines=true}
+\usepackage{hyperref}\hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
+
+\title{\textbf{基于单目视觉-惯性SLAM与GPS的路牌绝对位姿估计}\\——研究进展与工作总结}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%============================================================
+\section{项目背景}
+%============================================================
+
+本课题旨在实现室外场景下交通路牌的绝对物理位姿估计。核心方案：利用搭载D456相机和G90 RTK-GPS模块的移动平台，在不同位置拍摄同一路牌，通过视觉-惯性SLAM恢复相机轨迹，结合Looming测距和LoFTR特征匹配计算跨帧相对位姿，最终在GPS坐标系下输出路牌的绝对位置。预期精度优于2米。
+
+%============================================================
+\section{已完成工作总览}
+%============================================================
+
+截至当前，项目已完成从硬件搭建到算法验证的完整闭环，具体包括以下七个方面。
+
+\subsection{硬件平台搭建与数据采集流水线}
+
+\begin{itemize}
+    \item 完成D456相机+ROS2驱动部署，配置为单目彩色（848$\times$480@30fps）+融合IMU（200Hz）
+    \item 完成G90 RTK-GNSS模块接入，配置NTRIP差分服务（CORS账号），实现厘米级RTK固定解
+    \item 建立4终端并行数据采集流程：相机节点、bag录制、GPS驱动、GPS CSV录制，所有数据统一Unix时间戳对齐
+    \item 编写G90串口驱动脚本，解决NMEA/Unicore双协议混叠问题
+    \item 编写实时图像查看工具，录制过程中不影响数据完整性
+\end{itemize}
+
+\subsection{ORB-SLAM3编译与环境适配}
+
+\begin{itemize}
+    \item 解决Ubuntu 26.04 + GCC 15环境下的编译兼容性问题（Pangolin v0.6版本选择、cstdint缺失）
+    \item 定位并修复\texttt{-march=native}导致的g2o/Eigen内存对齐段错误
+    \item 统一DBoW2/g2o/主工程三个模块的C++标准（c++14）和编译选项
+    \item 建立完整的从零编译文档和自动化构建脚本
+\end{itemize}
+
+\subsection{SLAM系统调优与鲁棒性提升}
+
+\begin{itemize}
+    \item ORB参数室外优化：特征数1250$\to$2000，FAST阈值降至10/5，解决远景纹理稀疏导致的跟踪丢失
+    \item 修改\texttt{mono\_inertial\_euroc.cc}：增加每600帧自动保存轨迹（防止崩溃数据丢失）、注册异常信号处理器
+    \item 修复\texttt{extract\_bag.py}内存爆炸问题：从单次全加载改为两遍扫描，内存峰值从32GB降至3MB
+    \item 修正图片命名规则以匹配ORB-SLAM3官方EuRoC规范（纳秒时间戳文件名）
+\end{itemize}
+
+\subsection{数据集构建与标注工具}
+
+\begin{itemize}
+    \item 建立完整的数据处理pipeline：bag提取$\to$SLAM建图$\to$轨迹分割$\to$GPS匹配$\to$四角标注
+    \item 开发自动分割工具（按轨迹50m跳变切分，86K帧$\to$63段）
+    \item 开发交互式手动剪裁工具（图片+轨迹联动，支持快速跳帧）
+    \item 开发路牌四角点标注工具（鼠标点4角自动保存，实时写盘防丢失）
+    \item 开发GPS数据自动匹配脚本（按时间戳将test1.csv分配到各分割段）
+    \item 编写时间戳质量检测脚本（检查Delta跳变、乱序、首尾对齐）
+\end{itemize}
+
+\subsection{核心算法实现：Looming测距 + LoFTR位姿估计}
+
+已完成\texttt{test\_lsq.py}完整pipeline，包含以下模块：
+
+\begin{enumerate}
+    \item \textbf{滑动窗口Looming测距}：从单帧膨胀公式推导到16帧最小二乘联合优化，有效抑制单帧噪声
+    \item \textbf{汉字骨架提取}：LSD线段检测+横竖分类+离群剔除，利用汉字笔画天然3D正交性作为几何约束
+    \item \textbf{LoFTR跨帧密集匹配}：Kornia outdoor预训练模型，ROI内匹配（60-100对点），支持逐个审查
+    \item \textbf{单应性分解与正交筛选}：从$H$分解4组候选$(R,t,n)$，用正交误差$\mathcal{E}_{\text{ortho}}$筛选真实解
+    \item \textbf{平面参数估计}：从四角点+深度通过SVD恢复路牌平面法向量和距离
+    \item \textbf{3D可视化}：姿态对比、纸张形变建模、轨迹对齐，全部交互式可拖拽
+\end{enumerate}
+
+\subsection{GPS集成与真值验证}
+
+\begin{itemize}
+    \item 实现GPS坐标$\leftrightarrow$图像帧时间戳匹配（毫秒级精度）
+    \item 开发GPS交互式修正工具：在GPS轨迹图上手动调整匹配点，实时更新计算误差，附带两帧图片预览
+    \item 实现SLAM-GPS朝向对齐：从SLAM四元数提取相机朝向+GPS速度方向计算朝向，对视觉平移量做旋转变换后再投影
+    \item 建立双方法对比框架：方法A（纯SLAM轨迹预测，带尺度修正）vs 方法B（论文Looming+LoFTR方案+GPS朝向对齐）
+    \item 完成批量实验验证：遍历多个分割段对，统计GPS误差分布
+\end{itemize}
+
+\subsection{文档与工程规范}
+
+\begin{itemize}
+    \item 编写\texttt{RUN\_COMMANDS.md}：所有运行命令一步到位，覆盖录制、提取、SLAM、分割、标注、GPS全流程
+    \item 编写\texttt{SETUP\_GUIDE.md}：完整的环境安装与编译指南
+    \item 建立Git分支管理（gps\_v1），记录完整的开发历史
+    \item 编写可视化工具集：GPS轨迹3D+2D、轨迹尺度报告、分割段逐段浏览、匹配点高亮
+\end{itemize}
+
+%============================================================
+\section{关键技术细节}
+%============================================================
+
+\subsection{Looming测距公式}
+
+相机前向运动时，路牌在图像中的表观尺寸变化与距离的关系：
+
+\begin{equation}
+Z = r_{\text{near}} \cdot \frac{\Delta d}{dr} - \Delta d
+\end{equation}
+
+其中$r_{\text{near}}$为近帧ROI中心到FOE像素距离，$\Delta d = t_z$为相机前进量，$dr = r_{\text{near}} - r_{\text{far}}$为膨胀量。
+
+\subsection{汉字正交约束}
+
+从单应性$H$分解得到的4组候选解中，定义正交误差：
+
+\begin{equation}
+\mathcal{E}_{\text{ortho}} = \|\mathbf{n}_{\text{cv}} \cdot (\mathbf{v}_h \times \mathbf{v}_v)\|
+\end{equation}
+
+$\mathbf{v}_h$、$\mathbf{v}_v$为汉字横竖笔画在3D空间中的方向。正交误差最小者即为真实解。
+
+\subsection{GPS朝向对齐}
+
+\begin{align}
+\theta_{\text{slam}} &= \text{atan2}(f_x, f_z) \quad\text{（相机Z轴水平投影）}\\
+\theta_{\text{gps}} &= \text{atan2}(\Delta\text{lon}, \Delta\text{lat}) \quad\text{（GPS速度方向）}\\
+\theta_{\text{align}} &= \theta_{\text{gps}} - \theta_{\text{slam}}
+\end{align}
+
+将视觉平移量旋转后再投影到经纬度。
+
+\subsection{双方法对比框架}
+
+\begin{itemize}
+    \item \textbf{方法A（SLAM）}：利用SLAM轨迹的首尾GPS距离修正SLAM尺度，预测seq2位置。受尺度漂移影响大。
+    \item \textbf{方法B（论文）}：以seq1的GPS为基准，加上Looming+LoFTR计算的$t_{\text{real}}$（经朝向对齐），预测seq2位置。不依赖SLAM轨迹完整性。
+\end{itemize}
+
+%============================================================
+\section{实验结果概要}
+%============================================================
+
+\subsection{定性结论}
+
+\begin{enumerate}
+    \item Looming+LoFTR方案成功实现了跨帧路牌的绝对位姿估计，平移模长$|t_{\text{real}}|$与GPS真值（手动修正后）差距在亚米级
+    \item 汉字正交约束能够有效从4组候选位姿解中筛选真实解（正交误差阈值$\sim$0.15）
+    \item GPS自动匹配存在系统性偏移（10-14m），源自RTK掉线恢复后的坐标跳变。手动修正工具可有效解决
+    \item 纯SLAM方法（方法A）在长距离（45min/17.7km）运行后累积尺度误差不可接受（$>$30m），验证了论文方法的必要性
+    \item 批量实验中约半数数据对成功完成全pipeline，失败原因主要为段内帧数不足或路牌未入视野
+\end{enumerate}
+
+\subsection{典型单次结果}
+
+\begin{table}[h]\centering
+\begin{tabular}{lr}\toprule
+指标 & 典型值 \\\midrule
+Looming深度 Z & $\sim$8 m \\
+视觉平移 $|t_{\text{real}}|$ & $\sim$1.5 m \\
+GPS真值（修正后） & 1.5-2.0 m \\
+$|t_{\text{real}}|$ vs GPS误差 & 0.03-0.34 m \\
+论文方法预测误差 & $\sim$3 m \\
+SLAM方法预测误差 & $\sim$35 m \\\bottomrule
+\end{tabular}
+\caption{典型实验结果范围}
+\end{table}
+
+%============================================================
+\section{后续工作计划}
+%============================================================
+
+\begin{enumerate}
+    \item \textbf{批量实验完善}：遍历所有有效数据对，输出完整GPS误差分布统计
+    \item \textbf{多路牌联合优化}：利用多组路牌结果约束全局SLAM尺度
+    \item \textbf{实时系统集成}：将离线pipeline改造为ROS2节点化实时运行
+    \item \textbf{深度真值采集}：使用激光雷达或D456深度流获取路牌深度真值
+    \item \textbf{论文撰写}：整理实验数据和算法推导，撰写SCI期刊论文
+\end{enumerate}
+
+\end{document}

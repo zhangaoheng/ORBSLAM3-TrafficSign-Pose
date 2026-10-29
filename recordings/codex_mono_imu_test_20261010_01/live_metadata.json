@@ -1,0 +1,18 @@
+{
+  "device_serial": "252122301043",
+  "recording_mode": "monocular_imu",
+  "depth_recorded": false,
+  "image_count": 448,
+  "imu_count": 2999,
+  "discarded_color_frames": 0,
+  "online_processed_frames": 197,
+  "online_valid_poses": 0,
+  "dropped_slam_frames": 247,
+  "final_tracking_state": 1,
+  "optimized_trajectory_saved": false,
+  "max_slam_image_backlog": 5,
+  "slam_initialized": false,
+  "writer_failed": false,
+  "timestamp_domain": "Global Time",
+  "timestamp_domain_mismatch": false
+}
